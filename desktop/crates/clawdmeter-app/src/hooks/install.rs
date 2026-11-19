@@ -30,11 +30,14 @@ pub struct HookSpec {
     pub args: &'static str,
 }
 
-/// The five hooks: the attention card's four plus Stop, all logging events.
-pub const HOOKS: [HookSpec; 5] = [
+/// The six hooks: the attention card's four, Stop, and StopFailure (fired in
+/// Stop's place when an API error such as a usage limit ends the turn: it
+/// alerts, and ends the turn for the activity tracker), all logging events.
+pub const HOOKS: [HookSpec; 6] = [
     HookSpec { event: "UserPromptSubmit", matcher: None, args: "clear event" },
     HookSpec { event: "PostToolUse", matcher: None, args: "clear event" },
     HookSpec { event: "Stop", matcher: None, args: "event" },
+    HookSpec { event: "StopFailure", matcher: None, args: "alert event" },
     HookSpec { event: "Notification", matcher: None, args: "alert event" },
     HookSpec { event: "PreToolUse", matcher: Some("AskUserQuestion"), args: "alert event" },
 ];
@@ -317,7 +320,7 @@ pub fn remove(text: Option<&str>) -> Result<String, HookError> {
 pub enum HookStatus {
     /// None of our hooks.
     Missing,
-    /// All five, pointing at this binary.
+    /// All six, pointing at this binary.
     Installed,
     /// Uses the old `attention-hook.sh` script.
     Legacy,

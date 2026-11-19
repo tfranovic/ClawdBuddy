@@ -13,6 +13,7 @@ struct UsageData {
     int16_t fable_pct;       // `wf` Fable's weekly % of its own limit (0-999); -1 = absent
                              //   (unknown or no Fable limit): no overlay (fable.h)
     char status[16];         // "allowed", "limited", etc.
+    char last_tool[36];      // `lt` the last tool a session ran ("my-project: Bash"); "" = absent
     bool chime;              // play the session-reset chime; false unless the app opts in
     bool beep;               // Claude needs attention: play the chime once for this packet
     char alert_msg[128];     // attention message for the status line; empty = no alert

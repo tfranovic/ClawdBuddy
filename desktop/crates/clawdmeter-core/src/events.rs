@@ -17,7 +17,8 @@ pub enum HookKind {
     UserPromptSubmit,
     /// `PostToolUse`: a tool finished (also the end of a permission wait).
     PostToolUse,
-    /// `Stop`: the turn is done.
+    /// `Stop`: the turn is done. Also `StopFailure`, which Claude Code fires
+    /// in its place when an API error (a usage limit, say) ends the turn.
     Stop,
     /// `Notification`: Claude needs the user.
     Notification,
@@ -33,7 +34,7 @@ impl HookKind {
         match s {
             "UserPromptSubmit" => HookKind::UserPromptSubmit,
             "PostToolUse" => HookKind::PostToolUse,
-            "Stop" => HookKind::Stop,
+            "Stop" | "StopFailure" => HookKind::Stop,
             "Notification" => HookKind::Notification,
             "PreToolUse" => HookKind::PreToolUse,
             other => HookKind::Other(other.to_owned()),
@@ -426,6 +427,7 @@ mod tests {
     #[test]
     fn parse_lines() {
         assert_eq!(parse_line("1760000000 Stop abc"), Some(ev(1_760_000_000, "Stop", "abc")));
+        assert_eq!(parse_line("1760000000 StopFailure abc").map(|e| e.kind), Some(HookKind::Stop));
         assert_eq!(parse_line("1760000000.25 PostToolUse s1"), Some(ev(1_760_000_000, "PostToolUse", "s1")));
         assert_eq!(parse_line("1760000000 UserPromptSubmit"), Some(ev(1_760_000_000, "UserPromptSubmit", "")));
         assert_eq!(parse_line("1760000000 SessionStart x").unwrap().kind, HookKind::Other("SessionStart".into()));

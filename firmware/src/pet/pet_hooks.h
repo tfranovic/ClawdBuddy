@@ -26,6 +26,8 @@ void pet_on_nap_end(uint32_t seconds);
 // What the pet is doing when nothing else is asked of it: asleep without
 // live data, dizzy at a used-up limit, busy while tools run, else idle.
 uint8_t pet_persona(void);
+// The last tool a session ran, as the app sent it (`lt`); "" when unknown.
+const char* pet_last_tool(void);
 bool    pet_take_level_up(void);      // true once per level gained
 
 uint16_t pet_level(void);

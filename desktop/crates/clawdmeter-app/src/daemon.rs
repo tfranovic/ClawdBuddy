@@ -271,6 +271,7 @@ pub async fn run(paths: Paths, mut commands: mpsc::UnboundedReceiver<Command>, s
             engine.on_hook_event(&ev, now);
         }
         engine.set_hooks_installed(tail.exists());
+        engine.set_last_tool(clawdmeter_core::attention::read_last_tool(&paths.state_dir));
         let alert = inbox.take_alert(SystemTime::now());
         let clears = inbox.take_clears();
         if alert.is_some() || !clears.is_empty() {

@@ -10,6 +10,7 @@
 #include "../mascot.h"
 #include "pet_buddy.h"
 #include "pet_hooks.h"
+#include "pet_home.h"
 #include "pet_view.h"
 #include <Arduino.h>
 #include <string.h>
@@ -222,6 +223,7 @@ void mascot_attention(bool on, bool to_seat) {
 }
 
 void mascot_repaint(void) {
+    pet_home_repaint();
     if (created && mode != M_AWAY) draw();
 }
 
@@ -230,6 +232,7 @@ void mascot_tick(void) {
     if (!created) return;
     const uint32_t now = millis();
     pet_clock();
+    pet_home_tick();
     const bool ticked = pet_ticks() != drawn_tick;
     if (mode == M_AWAY) return;
     if (mode == M_HELD) return;            // a still frame

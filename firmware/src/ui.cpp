@@ -16,6 +16,7 @@
 #include "ui_text.h"
 #include "pace.h"
 #include "fable.h"
+#include "pet/pet_home.h"
 
 // Where everything goes, from the panel's shape (layout.h). Computed once in
 // ui_init() and treated as const for the rest of the program; a new panel
@@ -530,12 +531,15 @@ void ui_set_pair_hint(PairHint hint) {
 static void apply_title_font(void) {
     const int fmt = clock_base_epoch > 0 && clock_fmt == 12 ? 1 : 0;
     const lv_font_t* f = L.title_font[fmt];
+    // The pet layout has a clock or nothing: no "Usage" title.
+    if (L.pet_home && clock_base_epoch <= 0) f = nullptr;
     if (!f) {
         lv_obj_add_flag(lbl_title, LV_OBJ_FLAG_HIDDEN);
         return;
     }
     lv_obj_set_style_text_font(lbl_title, f, 0);
-    lv_obj_align(lbl_title, LV_ALIGN_TOP_MID, L.title_cx - L.w / 2, L.title_y[fmt]);
+    if (L.pet_home) lv_obj_align(lbl_title, LV_ALIGN_TOP_RIGHT, -(L.w - (L.stats.x + L.stats.w)), L.title_y[fmt]);
+    else            lv_obj_align(lbl_title, LV_ALIGN_TOP_MID, L.title_cx - L.w / 2, L.title_y[fmt]);
     lv_obj_clear_flag(lbl_title, LV_OBJ_FLAG_HIDDEN);
 }
 
@@ -711,7 +715,7 @@ void ui_init(void) {
     lv_obj_set_pos(battery_img, L.batt_x, L.batt_y);
     // Boards without battery telemetry never show the indicator (per the HAL
     // contract).
-    if (!board_caps().has_battery) {
+    if (!board_caps().has_battery || L.pet_home) {
         lv_obj_del(battery_img);
         battery_img = nullptr;
     } else {
@@ -736,7 +740,13 @@ void ui_init(void) {
         // Animated: idles, does acts, and takes walk-off/lurk trips (the
         // trips need PSRAM; without it he stays in his seat).
         // Created after the panels so he walks over the battery.
-        if (!mascot_create(scr, L.logo_x, feet, cell)) {
+        if (L.pet_home) {
+            // The pet's whole canvas at L.pet, not a corner slot: the slot
+            // and feet line that put it there (pet_mascot.cpp centres the
+            // body on a 72 px slot and stands it PET_FEET_Y down the canvas).
+            mascot_create(scr, L.pet.x + L.pet.w / 2 - 36, L.pet.y + L.pet.h * 70 / 82, cell);
+            pet_home_create(scr, L.stats.x, L.stats.y, L.stats.w, L.activity.x, L.activity.y, L.activity.w);
+        } else if (!mascot_create(scr, L.logo_x, feet, cell)) {
             logo_img = lv_image_create(scr);
             lv_image_set_src(logo_img, &logo_dsc);
             lv_obj_set_pos(logo_img, L.logo_x, top);

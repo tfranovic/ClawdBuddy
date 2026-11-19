@@ -45,6 +45,7 @@ bool payload_parse(const char* json, UsageData* out, const char** err) {
     const float wf = doc["wf"] | -1.0f;
     d.fable_pct = wf < 0 ? -1 : wf >= 999.0f ? 999 : (int16_t)(wf + 0.5f);
     copy_str(d.status, sizeof(d.status), doc["st"] | "unknown");
+    copy_str(d.last_tool, sizeof(d.last_tool), doc["lt"] | "");
     // as<bool>, not `| false`: daemons send 1, and `|` only accepts a JSON bool.
     d.chime = doc["c"].as<bool>();   // absent (old daemon / chime off) → stay silent
     d.beep = doc["b"].as<bool>();

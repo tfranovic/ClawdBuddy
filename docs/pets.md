@@ -20,6 +20,7 @@ which would replace this build: skip it, set `update_check = off`, or point
 | Where | Stock | Pet build |
 | --- | --- | --- |
 | The seat on the meters | Corner Clawd | The pet, 2× on a 480 panel (1× on small ones) |
+| The meters on a 480×480 panel | Header row (Clawd, title, battery), two 150 px cards | No header: the pet's whole canvas top left, its stats beside it (`pet_home.cpp`), a small clock top right when the app sends the time, two 114 px cards (`place_pet_home` in `layout.cpp`). Under the cards, three centred rows: the cycling word (or an alert), the last session to run a tool with the tool's name (`lt`), the number of active sessions |
 | Shows | Full-size Clawd performs | Acts in the seat (the path boards without PSRAM take) |
 | Screensaver | Clawd's face | The pet, large and asleep, on black |
 | Tap on the meters (the peek) | Clawd's face, curious | The pet, large and awake, with its stats |
@@ -29,9 +30,9 @@ On the peek, a tap in the left or right third of the screen steps to the
 previous or next species (saved on the device); a tap in the middle sends
 the pet back to its seat.
 
-The seat sits at the top edge, so the overlays the species draw above the
-body (Zs, hearts, exclamation marks) are mostly cut off there. They show in
-full on the large pet.
+On panels other than 480×480 the seat sits at the top edge, so the overlays
+the species draw above the body (Zs, hearts, exclamation marks) are mostly
+cut off there. They show in full on the large pet.
 
 ## States
 

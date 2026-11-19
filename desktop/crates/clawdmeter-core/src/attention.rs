@@ -53,6 +53,11 @@ pub enum AlertKind {
     Elicitation,
     /// Any other notification type; follows [`AlertKind::Permission`].
     Other,
+    /// The turn ended on a usage limit (`StopFailure`, `rate_limit`): the
+    /// session stopped and waits for the limit or for you.
+    Limit,
+    /// The turn ended on another API error (`StopFailure`).
+    Failed,
 }
 
 impl AlertKind {
@@ -64,6 +69,8 @@ impl AlertKind {
             AlertKind::Idle => "idle",
             AlertKind::Elicitation => "elicitation",
             AlertKind::Other => "other",
+            AlertKind::Limit => "limit",
+            AlertKind::Failed => "failed",
         }
     }
 
@@ -75,6 +82,8 @@ impl AlertKind {
             Some("question") => AlertKind::Question,
             Some("idle") => AlertKind::Idle,
             Some("elicitation") => AlertKind::Elicitation,
+            Some("limit") => AlertKind::Limit,
+            Some("failed") => AlertKind::Failed,
             Some(_) => AlertKind::Other,
         }
     }
@@ -91,6 +100,15 @@ impl AlertKind {
         }
     }
 
+    /// The kind for a `StopFailure` hook input, from its `error` type. Claude
+    /// Code fires it in place of `Stop` when an API error ends the turn.
+    pub fn from_stop_failure(error: Option<&str>) -> Self {
+        match error {
+            Some("rate_limit") => AlertKind::Limit,
+            _ => AlertKind::Failed,
+        }
+    }
+
     /// The word before the project name when the device names the waiting
     /// session ([`Alert::device_message`]): `Permission: my-project`.
     pub fn device_label(self) -> &'static str {
@@ -99,6 +117,8 @@ impl AlertKind {
             AlertKind::Permission | AlertKind::Other => "Permission",
             AlertKind::Idle => "Waiting",
             AlertKind::Elicitation => "MCP",
+            AlertKind::Limit => "Limit reached",
+            AlertKind::Failed => "Stopped on error",
         }
     }
 
@@ -110,6 +130,8 @@ impl AlertKind {
             AlertKind::Permission | AlertKind::Other => "Permission needed!",
             AlertKind::Idle => "Waiting for you!",
             AlertKind::Elicitation => "MCP request!",
+            AlertKind::Limit => "Limit reached!",
+            AlertKind::Failed => "Stopped on an error!",
         }
     }
 }
@@ -145,6 +167,32 @@ impl Alert {
             self.kind.device_text().to_owned()
         }
     }
+}
+
+/// The last-tool line on the device is cut to this many characters.
+pub const LAST_TOOL_LIMIT: usize = 34;
+
+/// What the `PostToolUse` hook last wrote to `<state>/last-tool`
+/// (`{"p": project, "t": tool}`), as the device shows it: `my-project: Bash`,
+/// or the tool alone without a project. An MCP tool (`mcp__server__tool`)
+/// shows its last part. A long project name is cut (`a-very-long-project-name-ind..: Edit`)
+/// so the tool always shows. `None` when the file is absent or unreadable.
+pub fn read_last_tool(dir: &Path) -> Option<String> {
+    let raw = fs::read_to_string(dir.join("last-tool")).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    let tool = v.get("t")?.as_str()?;
+    let tool = tool.rsplit("__").next().unwrap_or(tool);
+    let tool = to_ascii(tool, LAST_TOOL_LIMIT);
+    let project = v.get("p").and_then(|p| p.as_str()).map(|p| to_ascii(p, PROJECT_LIMIT)).unwrap_or_default();
+    let room = LAST_TOOL_LIMIT.saturating_sub(tool.len() + 2);
+    let line = if project.is_empty() || room < 4 {
+        tool
+    } else if project.len() <= room {
+        format!("{project}: {tool}")
+    } else {
+        format!("{}..: {tool}", &project[..room - 2])
+    };
+    (!line.is_empty()).then_some(line)
 }
 
 /// Fold to ASCII (drop accents), collapse whitespace, cap at `limit` chars
@@ -537,6 +585,9 @@ mod tests {
         assert_eq!(line(AlertKind::Question, "a", "api"), "Question: api");
         assert_eq!(line(AlertKind::Idle, "a", "api"), "Waiting: api");
         assert_eq!(line(AlertKind::Elicitation, "a", "api"), "MCP: api");
+        assert_eq!(line(AlertKind::Limit, "a", "api"), "Limit reached: api");
+        assert_eq!(line(AlertKind::Failed, "a", "api"), "Stopped on error: api");
+        assert_eq!(line(AlertKind::Limit, "a", ""), "Limit reached!");
         // No project recorded (older hooks, or `alert_project = off`): the fixed line.
         assert_eq!(line(AlertKind::Permission, "a", ""), "Permission needed!");
         // The test alert keeps its own text.
@@ -584,6 +635,20 @@ mod tests {
     }
 
     #[test]
+    fn last_tool_line() {
+        let d = tmpdir("lasttool");
+        assert_eq!(read_last_tool(&d), None);
+        fs::write(d.join("last-tool"), r#"{"p":"api","t":"Bash"}"#).unwrap();
+        assert_eq!(read_last_tool(&d).as_deref(), Some("api: Bash"));
+        fs::write(d.join("last-tool"), r#"{"t":"mcp__github__create_issue"}"#).unwrap();
+        assert_eq!(read_last_tool(&d).as_deref(), Some("create_issue"));
+        fs::write(d.join("last-tool"), r#"{"p":"a-very-long-project-name-indeed-yes","t":"Edit"}"#).unwrap();
+        assert_eq!(read_last_tool(&d).as_deref(), Some("a-very-long-project-name-i..: Edit"));
+        fs::write(d.join("last-tool"), "junk").unwrap();
+        assert_eq!(read_last_tool(&d), None);
+    }
+
+    #[test]
     fn alert_kinds_from_hook_input() {
         let k = AlertKind::from_hook;
         assert_eq!(k(Some("PreToolUse"), None), AlertKind::Question);
@@ -592,7 +657,18 @@ mod tests {
         assert_eq!(k(Some("Notification"), Some("idle_prompt")), AlertKind::Idle);
         assert_eq!(k(Some("Notification"), Some("elicitation_dialog")), AlertKind::Elicitation);
         assert_eq!(k(Some("Notification"), Some("auth_success")), AlertKind::Other);
-        for kind in [AlertKind::Permission, AlertKind::Question, AlertKind::Idle, AlertKind::Elicitation] {
+        assert_eq!(AlertKind::from_stop_failure(Some("rate_limit")), AlertKind::Limit);
+        assert_eq!(AlertKind::from_stop_failure(Some("server_error")), AlertKind::Failed);
+        assert_eq!(AlertKind::from_stop_failure(None), AlertKind::Failed);
+        let kinds = [
+            AlertKind::Permission,
+            AlertKind::Question,
+            AlertKind::Idle,
+            AlertKind::Elicitation,
+            AlertKind::Limit,
+            AlertKind::Failed,
+        ];
+        for kind in kinds {
             assert_eq!(AlertKind::parse(Some(kind.as_str())), kind);
         }
         assert_eq!(AlertKind::parse(None), AlertKind::Permission, "legacy files have no kind");

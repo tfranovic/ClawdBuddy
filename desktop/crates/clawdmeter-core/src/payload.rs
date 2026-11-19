@@ -94,6 +94,11 @@ pub struct Payload {
     /// Sessions with a hook event in the last 5 minutes.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub n: Option<u32>,
+    /// The last tool a session ran, as the device shows it:
+    /// `my-project: Bash` ([`crate::attention::read_last_tool`]). The first
+    /// field dropped when a write would not fit.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lt: Option<String>,
     /// 1 = the usage numbers are a replay, not a fresh poll (heartbeats and
     /// writes between polls): the rate math ignores them. Fast-clock fields in
     /// the same write still count.
@@ -137,7 +142,7 @@ pub struct Payload {
 /// Every key [`Payload`] can emit, in serialization order.
 pub const PAYLOAD_KEYS: &[&str] = &[
     "s", "sr", "w", "wr", "wf", "st", "acct", "pv", "rc", "rx", "tp", "pd", "rd", "t", "tf", "c", "ok", "b", "m", "x",
-    "a", "e", "es", "n", "rp", "lv", "aa", "pm", "k1", "k2", "k3", "th", "fc",
+    "a", "e", "es", "n", "lt", "rp", "lv", "aa", "pm", "k1", "k2", "k3", "th", "fc",
 ];
 
 /// The fast-clock keys added in v0.4 (old firmware ignores them).
@@ -355,6 +360,10 @@ impl Payload {
     pub fn encode(&self, limit: usize) -> Vec<u8> {
         let mut data = self.to_json().into_bytes();
         let mut p = self.clone();
+        if data.len() > limit && p.lt.is_some() {
+            p.lt = None;
+            data = p.to_json().into_bytes();
+        }
         let mut msg = p.m.clone().unwrap_or_default();
         while data.len() > limit && !msg.is_empty() {
             let over = data.len() - limit;
@@ -665,6 +674,7 @@ mod tests {
             e: Some("p".into()),
             es: Some(u32::MAX),
             n: Some(99),
+            lt: None,
             rp: Some(1),
             lv: Some(5),
             aa: Some(120),
@@ -707,6 +717,7 @@ mod tests {
             e: Some("p".into()),
             es: Some(7),
             n: Some(1),
+            lt: Some("api: Bash".into()),
             rp: Some(1),
             lv: Some(3),
             aa: Some(120),

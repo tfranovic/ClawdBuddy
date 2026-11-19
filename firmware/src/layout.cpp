@@ -483,6 +483,39 @@ static bool place_round(Layout& L, const Design& d, const Chrome** chrome) {
     return place_round_with(L, d, CHROME_SMALL);
 }
 
+// ─── The pet build's 480x480 screen ──────────────────────────────────────────
+
+#ifdef PET_ASCII
+// The pet's canvas (120x82 at 2x) and its stats take the top 170 px; the
+// cards keep their type on less height, the bar slimmer and the reset line
+// one size down. Under them, three centred rows: the status word (or an
+// alert), the last tool a session ran, the number of active sessions.
+static void place_pet_home(Layout& L) {
+    L.pet_home = true;
+    L.pet   = { 8, 4, 240, 164 };
+    L.stats = { 258, 44, 212, 120 };
+    const int16_t top = 172, card_h = 114, gap = 8;
+    L.card[0].y = top;                 L.card[0].h = card_h;
+    L.card[1].y = top + card_h + gap;  L.card[1].h = card_h;
+    L.pad_y = 8;
+    L.bar_y = 52;  L.bar_h = 16;
+    L.reset_y = 72;
+    L.reset_font = &font_styrene_24;
+    L.status_y = -36;                           // the status word: 410..444
+    L.activity = { 20, 444, 440, 34 };          // two 17 px rows under it (pet_home.cpp)
+}
+
+// The clock: small, in the top right corner over the stats (ui.cpp aligns
+// it to the stats column's right edge).
+static void place_pet_title(Layout& L) {
+    L.title_cx = L.stats.x + L.stats.w / 2;
+    for (int fmt = 0; fmt < 2; fmt++) {
+        L.title_font[fmt] = &font_styrene_28;
+        L.title_y[fmt] = 6;
+    }
+}
+#endif
+
 // ─── Entry point ─────────────────────────────────────────────────────────────
 
 // ─── Codex Resets card ───────────────────────────────────────────────────────
@@ -592,7 +625,14 @@ Layout layout_compute(const LayoutShape& shape) {
         fit_narrow(L);
         fit_height(L, *c);
     }
+#ifdef PET_ASCII
+    const bool pet_home = !shape.round && shape.w == 480 && shape.h == 480;
+    if (pet_home) place_pet_home(L);
+#endif
     fit_title(L, *c);
+#ifdef PET_ASCII
+    if (pet_home) place_pet_title(L);
+#endif
     fit_pairing(L, *d);
     fit_period(L);
     fit_resets(L);

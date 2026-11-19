@@ -228,7 +228,11 @@ The device names what the session is waiting for, and which project it is
 in, in one short line: **Question: my-project**, **Permission: my-project**,
 **Waiting: my-project** (an idle prompt) or **MCP: my-project**. Without a
 project (or with `alert_project = off`) it reads **Question for you**,
-**Permission needed!**, **Waiting for you!** or **MCP request!**. The test alert says **Clawdmeter test alert**.
+**Permission needed!**, **Waiting for you!** or **MCP request!**. When a
+usage limit ends a turn the line reads `Limit reached: my-project`
+(**Limit reached!** without a project), and `Stopped on error: my-project`
+for any other API error; both follow the `permission` switch of `alert_on`
+and clear at the session's next prompt. The test alert says **Clawdmeter test alert**.
 
 A tap or the device's two-minute timeout dismisses the alert on the device
 and tells the app to clear it from the tray too. Answering also clears the

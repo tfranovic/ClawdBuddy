@@ -80,6 +80,7 @@ pub fn run(mode: Mode, input: &str, state_dir: &Path, now_unix: u64) {
     if mode.log_too {
         let _ = log_event(&v, state_dir, now_unix);
     }
+    let _ = write_last_tool(&v, state_dir);
     let _ = match mode.action {
         Action::Alert => write_alert(&v, state_dir),
         Action::Clear => touch_clear(&v, state_dir),
@@ -163,8 +164,13 @@ fn project_of(cwd: Option<&Value>) -> Option<String> {
 /// plus `k`, the alert kind.
 pub fn alert_json(v: &Value) -> Option<String> {
     let obj = as_jq_object(v)?;
+    let text = |k: &str| obj.get(k).and_then(Value::as_str);
+    let failure = text("hook_event_name") == Some("StopFailure");
     let m = match present(obj.get("message")) {
         Some(m) => m.clone(),
+        // A turn that ended on an API error: the error type alone
+        // (`rate_limit`), never the conversation's text.
+        None if failure => Value::String(text("error").unwrap_or("unknown").to_owned()),
         // jq raises (and the script writes nothing) when a step along
         // `.tool_input.questions[0].question` has the wrong type.
         None => {
@@ -172,8 +178,11 @@ pub fn alert_json(v: &Value) -> Option<String> {
         }
     };
     let s = obj.get("session_id").cloned().unwrap_or(Value::Null);
-    let text = |k: &str| obj.get(k).and_then(Value::as_str);
-    let kind = AlertKind::from_hook(text("hook_event_name"), text("notification_type"));
+    let kind = if failure {
+        AlertKind::from_stop_failure(text("error"))
+    } else {
+        AlertKind::from_hook(text("hook_event_name"), text("notification_type"))
+    };
     let mut out = Map::new();
     out.insert("k".into(), Value::String(kind.as_str().into()));
     out.insert("m".into(), m);
@@ -202,6 +211,32 @@ fn question(tool_input: Option<&Value>) -> Option<Option<Value>> {
         Some(_) => return None,
     };
     key(first.as_ref(), "question")
+}
+
+/// The `last-tool` file's text for a `PostToolUse` input: the tool's name and
+/// the session's project (`{"p": project, "t": tool}`), never its input or
+/// output. `None` for any other event.
+pub fn last_tool_json(v: &Value) -> Option<String> {
+    let obj = v.as_object()?;
+    if obj.get("hook_event_name")?.as_str()? != "PostToolUse" {
+        return None;
+    }
+    let tool = obj.get("tool_name")?.as_str()?;
+    let mut out = Map::new();
+    if let Some(p) = project_of(obj.get("cwd")) {
+        out.insert("p".into(), Value::String(p));
+    }
+    out.insert("t".into(), Value::String(tool.to_owned()));
+    Some(Value::Object(out).to_string() + "\n")
+}
+
+fn write_last_tool(v: &Value, dir: &Path) -> io::Result<()> {
+    let Some(body) = last_tool_json(v) else { return Ok(()) };
+    let tmp = dir.join(format!("last-tool.{}", std::process::id()));
+    fs::write(&tmp, body)?;
+    fs::rename(&tmp, dir.join("last-tool")).inspect_err(|_| {
+        let _ = fs::remove_file(&tmp);
+    })
 }
 
 fn write_alert(v: &Value, dir: &Path) -> io::Result<()> {
@@ -311,6 +346,15 @@ mod tests {
         );
         let q = json!({"hook_event_name": "PreToolUse", "tool_input": {"questions": [{"question": "Pick one"}]}, "session_id": "s2"});
         assert_eq!(alert_json(&q).unwrap(), "{\"k\":\"question\",\"m\":\"Pick one\",\"s\":\"s2\"}\n");
+        let limit = json!({"hook_event_name": "StopFailure", "error": "rate_limit", "session_id": "s", "cwd": "/w/api",
+            "last_assistant_message": "API Error: Rate limit reached"});
+        assert_eq!(alert_json(&limit).unwrap(), "{\"k\":\"limit\",\"m\":\"rate_limit\",\"s\":\"s\",\"p\":\"api\"}\n");
+        let failed = json!({"hook_event_name": "StopFailure", "error": "server_error", "session_id": "s"});
+        assert_eq!(alert_json(&failed).unwrap(), "{\"k\":\"failed\",\"m\":\"server_error\",\"s\":\"s\"}\n");
+        let tool = json!({"hook_event_name": "PostToolUse", "tool_name": "Bash", "cwd": "/w/api",
+            "tool_input": {"command": "secret"}});
+        assert_eq!(last_tool_json(&tool).unwrap(), "{\"p\":\"api\",\"t\":\"Bash\"}\n");
+        assert_eq!(last_tool_json(&json!({"hook_event_name": "Stop", "tool_name": "Bash"})), None);
         let idle = json!({"hook_event_name": "Notification", "notification_type": "idle_prompt", "message": "Waiting"});
         assert_eq!(alert_json(&idle).unwrap(), "{\"k\":\"idle\",\"m\":\"Waiting\",\"s\":null}\n");
         assert_eq!(alert_json(&json!({"tool_input": {}})).unwrap(), "{\"k\":\"permission\",\"m\":\"\",\"s\":null}\n");

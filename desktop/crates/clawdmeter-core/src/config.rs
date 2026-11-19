@@ -530,7 +530,8 @@ pub struct Settings {
 
 /// `alert_on`: the alert kinds that show, as a comma list of `permission`,
 /// `question`, `idle`, `elicitation` (`none` for no alerts). Default: all
-/// but `idle`. Other notification types follow `permission`.
+/// but `idle`. Other notification types follow `permission`, and so does a
+/// turn that ended on a usage limit or an API error.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AlertOn {
     /// Permission requests (and unrecognised notification types).
@@ -587,7 +588,7 @@ impl AlertOn {
     pub fn allows(&self, kind: crate::attention::AlertKind) -> bool {
         use crate::attention::AlertKind as K;
         match kind {
-            K::Permission | K::Other => self.permission,
+            K::Permission | K::Other | K::Limit | K::Failed => self.permission,
             K::Question => self.question,
             K::Idle => self.idle,
             K::Elicitation => self.elicitation,

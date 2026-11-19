@@ -74,8 +74,12 @@ void pet_hooks_init(void) {
 }
 
 // ─── Inputs ──────────────────────────────────────────────────────────────────
+static char last_tool[36] = "";
+const char* pet_last_tool(void) { return last_tool; }
+
 void pet_on_payload(const UsageData* d, const SignalsUpdate* sig) {
     if (!d->valid || !d->ok) return;
+    if (d->last_tool[0]) snprintf(last_tool, sizeof(last_tool), "%s", d->last_tool);
     // A Codex account's numbers are not Claude's (signals reports them as a
     // replay), so they neither feed the pet nor make it dizzy.
     if (!d->codex) usage_full = d->session_pct >= 100.0f;

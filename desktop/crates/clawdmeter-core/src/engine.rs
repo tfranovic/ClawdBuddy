@@ -145,6 +145,9 @@ pub struct Engine {
     sent_a: Option<u8>,
     sent_a_at: i64,
     sent_n: Option<u32>,
+    last_tool: Option<String>,
+    sent_lt: Option<String>,
+    sent_lt_at: i64,
     /// The liveliness the device last got (`lv`).
     sent_lv: Option<u8>,
     /// The attention animation the device last got (`aa`).
@@ -202,6 +205,9 @@ impl Engine {
             sent_a: None,
             sent_a_at: i64::MIN / 2,
             sent_n: None,
+            last_tool: None,
+            sent_lt: None,
+            sent_lt_at: 0,
             sent_lv: None,
             sent_aa: None,
             sent_pm: None,
@@ -293,6 +299,13 @@ impl Engine {
         }
     }
 
+    /// The last tool a session ran ([`crate::attention::read_last_tool`]).
+    pub fn set_last_tool(&mut self, line: Option<String>) {
+        if line.is_some() {
+            self.last_tool = line;
+        }
+    }
+
     /// A new alert went up since the last call and `desktop_chime` is on:
     /// play the chime on this computer.
     pub fn take_desktop_chime(&mut self) -> bool {
@@ -321,6 +334,7 @@ impl Engine {
         self.attention.reset();
         self.sent_a = None;
         self.sent_n = None;
+        self.sent_lt = None;
         self.sent_lv = None;
         self.sent_aa = None;
         self.sent_pm = None;
@@ -635,6 +649,11 @@ impl Engine {
         let new_event = event_fresh && self.activity.seq != self.sent_seq;
         let a_changed = hooks && self.sent_a != Some(level) && now - self.sent_a_at >= ACTIVITY_MIN_INTERVAL;
         let n_changed = hooks && self.sent_n != Some(sessions);
+        // Tools run every few seconds: the line follows at the activity's pace.
+        let lt_changed = hooks
+            && self.last_tool.is_some()
+            && self.sent_lt != self.last_tool
+            && now - self.sent_lt_at >= ACTIVITY_MIN_INTERVAL;
         // A changed device setting goes out right away, like an event.
         let aa = self.settings.attention_anim.seconds();
         let pm = u8::from(self.settings.pace_marker);
@@ -661,7 +680,7 @@ impl Engine {
                 WriteKind::Poll
             } else if self.attention.pending() {
                 WriteKind::Attention
-            } else if (new_event || a_changed || n_changed || prefs_changed) && !self.stale(now) {
+            } else if (new_event || a_changed || n_changed || lt_changed || prefs_changed) && !self.stale(now) {
                 // Any ok payload refreshes the device's DATA_FRESH_MS, so
                 // while the numbers are stale only alerts and polls go out
                 // and the device can show its stale state.
@@ -706,6 +725,7 @@ impl Engine {
         if hooks {
             payload.a = Some(level);
             payload.n = Some(sessions);
+            payload.lt = self.last_tool.clone();
             if event_fresh {
                 if let Some(code) = self.activity.latest {
                     payload.e = Some(code.as_str().to_owned());
@@ -734,6 +754,10 @@ impl Engine {
         }
         if let Some(n) = w.payload.n {
             self.sent_n = Some(n);
+        }
+        if w.payload.lt.is_some() && self.sent_lt != w.payload.lt {
+            self.sent_lt = w.payload.lt.clone();
+            self.sent_lt_at = now;
         }
         if let Some(lv) = w.payload.lv {
             self.sent_lv = Some(lv);

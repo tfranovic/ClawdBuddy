@@ -24,6 +24,15 @@ struct LayoutRect { int16_t x, y, w, h; };
 struct Layout {
     int16_t w, h;
 
+    // The pet build on a 480x480 panel (-DPET_ASCII): no header row. The
+    // pet's whole canvas sits at the top left with its stats beside it, a
+    // small clock above the stats (no "Usage" title), no battery icon, and
+    // shorter cards under them. False everywhere else.
+    bool       pet_home;
+    LayoutRect pet;                  // the pet's canvas at 2x
+    LayoutRect stats;                // the stats column (pet_home.cpp)
+    LayoutRect activity;             // last tool and session count, two rows under the status word
+
     // Header: the corner Clawd's slot on the left, the battery on the
     // right, the clock (or "Usage") between them.
     bool    small_icons;             // 40 px Clawd slot + 24 px battery (else 80 / 48)

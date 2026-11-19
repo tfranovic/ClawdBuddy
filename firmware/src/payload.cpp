@@ -127,6 +127,10 @@ bool payload_parse(const char* json, UsageData* out, const char** err) {
     copy_str(d.team_extra, sizeof(d.team_extra), doc["tx"] | "");
     d.has_detail = !doc["td"].isNull();
     copy_str(d.detail, sizeof(d.detail), doc["td"] | "");
+    const char* ps = doc["ps"] | "";
+    d.pet_mood = (ps[0] >= '0' && ps[0] <= '4') ? (int8_t)(ps[0] - '0') : -1;
+    d.pet_energy = (ps[0] && ps[1] >= '0' && ps[1] <= '5') ? (int8_t)(ps[1] - '0') : -1;
+    d.pet_energy_own = ps[0] && ps[1] == '-';
     JsonVariant aw = doc["aw"];
     d.away = aw.isNull() ? -1 : (int8_t)((aw | 0) ? 1 : 0);
     JsonVariant pm = doc["pm"];

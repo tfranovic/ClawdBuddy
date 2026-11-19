@@ -161,6 +161,9 @@ pub struct Engine {
     /// Nobody is at the computer; `None` where that isn't known.
     away: Option<bool>,
     sent_aw: Option<u8>,
+    /// The pet's mood and energy (`ps`).
+    pet: Option<String>,
+    sent_ps: Option<String>,
     /// The newest status-line numbers taken as a reading, per account.
     status_at: HashMap<PathBuf, i64>,
     sent_tm: Option<String>,
@@ -233,6 +236,8 @@ impl Engine {
             sent_tx: None,
             away: None,
             sent_aw: None,
+            pet: None,
+            sent_ps: None,
             status_at: HashMap::new(),
             sent_tm: None,
             sent_tm_at: 0,
@@ -342,6 +347,11 @@ impl Engine {
         self.desks = team.desks;
     }
 
+    /// The pet's mood and energy ([`crate::team::encode_pet`]).
+    pub fn set_pet(&mut self, ps: String) {
+        self.pet = Some(ps);
+    }
+
     /// The device asks for a desk's detail card (a tap on it).
     pub fn on_device_detail(&mut self, desk: u8) {
         self.detail_want = Some(desk);
@@ -392,6 +402,7 @@ impl Engine {
         self.sent_tm = None;
         self.sent_tx = None;
         self.sent_aw = None;
+        self.sent_ps = None;
         self.detail_want = None;
         self.sent_tv = None;
         self.sent_lv = None;
@@ -799,6 +810,7 @@ impl Engine {
             || self.sent_pm != Some(pm)
             || self.sent_tv != Some(tv)
             || (aw.is_some() && self.sent_aw != aw)
+            || (hooks && self.pet.is_some() && self.sent_ps != self.pet)
             || self.sent_k != Some(k)
             || self.sent_th != Some(th)
             || self.sent_tf != Some(tf);
@@ -842,6 +854,7 @@ impl Engine {
             p.aa = Some(aa);
             p.pm = Some(pm);
             p.tv = Some(tv);
+            p.ps = self.pet.clone().filter(|ps| hooks && self.sent_ps.as_ref() != Some(ps));
             // The device keeps it: sent on a change, and while away.
             p.aw = aw.filter(|a| *a == 1 || self.sent_aw != Some(*a));
             if tv != 0 {
@@ -921,6 +934,9 @@ impl Engine {
         }
         if let Some(tv) = w.payload.tv {
             self.sent_tv = Some(tv);
+        }
+        if w.payload.ps.is_some() {
+            self.sent_ps.clone_from(&w.payload.ps);
         }
         if w.payload.aw.is_some() {
             self.sent_aw = w.payload.aw;

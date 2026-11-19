@@ -86,8 +86,8 @@ What moves its stats:
 | Stat | What moves it |
 | --- | --- |
 | **Level** and **fed** | Rises in the main usage meter. With a 5-hour limit: ten fed pips and one level per five full sessions. On an account with no 5-hour limit: a fed pip per 10 % of the week, a level per full week. |
-| **Mood** | How quickly you answer alerts: under 15 seconds is the top mood, over 2 minutes the bottom. Alerts left to time out pull it down. |
-| **Energy** | 3 of 5 at start-up, full after a rest on the screensaver of a minute or more, one less every 2 hours awake. |
+| **Mood** | How well you keep your sessions unblocked. A session is held up by you while a question or a permission prompt is up, and for 15 minutes after its turn ends if nobody picks it up. The mood follows the share of your sessions held up, over about the last quarter hour: nearly none is the top mood, close to half or more the bottom. Time away from the computer (macOS) is not counted. |
+| **Energy** | How much context the fullest session has left: five pips under 20 % used, one from 75 %, none from 90 %. It comes back when that session compacts or ends. Needs ClawdBuddy's status line; without it, energy is 3 of 5 at start-up, full after a rest on the screensaver, one less every 2 hours awake. |
 
 The species and the stats are saved on the board and survive a restart or a
 reflash.

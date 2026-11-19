@@ -13,6 +13,8 @@ static PetStats  stats;
 static PetEnergy energy;
 static bool      level_up = false;
 static bool      usage_full = false;
+// What the app last said (`ps`); -1 = nothing, the board's own rules.
+static int8_t    app_mood = -1, app_energy = -1;
 
 // The alert on screen, for the answer time.
 static bool      alert_up = false;
@@ -82,6 +84,10 @@ void pet_on_payload(const UsageData* d, const SignalsUpdate* sig) {
     if (!d->valid || !d->ok) return;
     if (d->last_tool[0]) snprintf(last_tool, sizeof(last_tool), "%s", d->last_tool);
     team_view_on_payload(d);
+    // The app's word on the mood and energy stands until its next one.
+    if (d->pet_mood >= 0) app_mood = d->pet_mood;
+    if (d->pet_energy >= 0) app_energy = d->pet_energy;
+    else if (d->pet_energy_own) app_energy = -1;
     // A Codex account's numbers are not Claude's (signals reports them as a
     // replay), so they neither feed the pet nor make it dizzy.
     if (!d->codex) usage_full = d->session_pct >= 100.0f;
@@ -146,7 +152,10 @@ bool pet_take_level_up(void) {
 
 uint16_t pet_level(void)  { return pet_stats_level(&stats); }
 uint8_t  pet_fed(void)    { return pet_stats_fed(&stats); }
-uint8_t  pet_mood(void)   { return pet_stats_mood(&stats); }
-uint8_t  pet_energy(void) { return pet_energy_tier(&energy, millis()); }
+// The app's when it sends them: the mood from sessions left waiting, the
+// energy from the fullest session's context. Else the board's own rules
+// (answer times; naps).
+uint8_t  pet_mood(void)   { return app_mood >= 0 ? (uint8_t)app_mood : pet_stats_mood(&stats); }
+uint8_t  pet_energy(void) { return app_energy >= 0 ? (uint8_t)app_energy : pet_energy_tier(&energy, millis()); }
 
 #endif  // PET_ASCII

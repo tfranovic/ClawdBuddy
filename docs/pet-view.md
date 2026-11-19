@@ -60,8 +60,8 @@ The rules are in `firmware/src/pet/pet_stats_core.cpp` (pure, tested by
 | Stat | Input | Rule |
 | --- | --- | --- |
 | Level, fed | Rises in the main usage meter | 500 percentage points a level, ten fed pips each: five full sessions. On an account with no 5-hour limit the meter is the week and its rises count five times: a level per full week, a pip per 10 %. Replays, resets and a change of account kind feed nothing. |
-| Mood | How alerts end | The median seconds from an alert arriving to the computer clearing it (last 8). Lowered when more than a third of alerts run into the 2-minute timeout. |
-| Energy | Naps | 3 of 5 at boot, full after a screensaver rest of a minute or more, one less every 2 hours. |
+| Mood | `ps`, first digit | Worked out by the app (`team::PetMood`): the share of the office's sessions held up by the user, as an average that forgets about two thirds every 15 minutes. Under 6 % is 4, under 15 % 3, under 30 % 2, under 45 % 1, else 0. Not updated while the user is away. Without `ps` (an older app): the median seconds from an alert arriving to the computer clearing it (last 8), lowered when more than a third of alerts run into the timeout. |
+| Energy | `ps`, second digit | Worked out by the app (`team::pet_energy`) from the highest context % among the sessions: under 20 is 5, under 40 4, under 60 3, under 75 2, under 90 1, else 0. When no context is known the app sends `-` and the board's own rule applies: 3 of 5 at boot, full after a screensaver rest of a minute or more, one less every 2 hours. |
 
 A tap that dismisses an alert on the board counts as neither an answer nor a
 timeout. Permission alerts reach the board about six seconds after the prompt

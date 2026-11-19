@@ -224,6 +224,10 @@ pub struct Desk {
     pub mode: char,
     /// The model's letter in `tx` (`-` unknown).
     pub model: char,
+    /// The session is held up by the user: a question or a permission
+    /// prompt is up, or its turn ended (or failed) within
+    /// [`IDLE_TTL_SECS`] and nobody has picked it up. The pet's mood.
+    pub blocked: bool,
     /// For the detail card.
     pub detail: Detail,
 }
@@ -448,6 +452,10 @@ pub fn desks_with(events: &[TeamEvent], now: i64, beside: &Beside) -> Vec<Desk> 
     let mut out: Vec<Desk> = Vec::with_capacity(live.len());
     for (sid, s) in live {
         let state = state_at(&s, now);
+        let blocked = state == State::Waiting
+            || (matches!(s.state, Some(State::Done | State::Failed))
+                && s.subs.is_empty()
+                && now - s.since < IDLE_TTL_SECS);
         let since = if state == s.state.unwrap_or_default() { s.since } else { derived_since(&s, state, now) };
         let subs = s.subs.len().min(9) as u8;
         let quiet = s.subs.values().filter(|sub| now - sub.seen >= BREAK_AFTER_SECS).count().min(9) as u8;
@@ -482,6 +490,7 @@ pub fn desks_with(events: &[TeamEvent], now: i64, beside: &Beside) -> Vec<Desk> 
             context: numbers.and_then(|n| n.context),
             mode: mode_letter(&s.mode),
             model: model_letter(&model_name),
+            blocked,
             detail: Detail {
                 title: name,
                 project,
@@ -621,6 +630,80 @@ pub fn encode_extra(desks: &[Desk]) -> String {
             format!("{}{ctx}{}{}", d.state.code(), or_dash(d.mode), or_dash(d.model))
         })
         .collect()
+}
+
+/// The pet's mood can be this high.
+pub const MOOD_MAX: u8 = 4;
+/// ... and its energy this high.
+pub const ENERGY_MAX: u8 = 5;
+/// How far back the mood remembers: a moment's weight falls to about a
+/// third after this long.
+pub const MOOD_MEMORY_SECS: f64 = 900.0;
+
+/// The pet's mood: how well the sessions are kept unblocked. It follows the
+/// share of the sessions in the office that are held up by the user
+/// ([`Desk::blocked`]), averaged over about the last quarter hour, so one
+/// slow answer among many busy sessions costs little and a team left
+/// waiting costs a lot. Time away from the computer is not counted.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PetMood {
+    share: f64,
+    last: Option<i64>,
+}
+
+impl Default for PetMood {
+    /// Neutral until there is something to go by.
+    fn default() -> Self {
+        PetMood { share: 0.2, last: None }
+    }
+}
+
+impl PetMood {
+    /// Take in the desks at `now`; `away` = nobody is at the computer.
+    /// Returns the mood, 0 to [`MOOD_MAX`].
+    pub fn update(&mut self, now: i64, desks: &[Desk], away: bool) -> u8 {
+        let dt = self.last.map_or(0, |t| (now - t).clamp(0, 60)) as f64;
+        self.last = Some(now);
+        if !away && dt > 0.0 {
+            let blocked = desks.iter().filter(|d| d.blocked).count() as f64;
+            let share = if desks.is_empty() { 0.0 } else { blocked / desks.len() as f64 };
+            let keep = (-dt / MOOD_MEMORY_SECS).exp();
+            self.share = self.share * keep + share * (1.0 - keep);
+        }
+        self.mood()
+    }
+
+    /// The mood as it stands.
+    pub fn mood(&self) -> u8 {
+        match self.share {
+            s if s < 0.06 => 4,
+            s if s < 0.15 => 3,
+            s if s < 0.30 => 2,
+            s if s < 0.45 => 1,
+            _ => 0,
+        }
+    }
+}
+
+/// The pet's energy: the context headroom of the fullest session, 0 to
+/// [`ENERGY_MAX`]. `None` when no session's context is known (no status
+/// line): the device then keeps its own rule.
+pub fn pet_energy(desks: &[Desk]) -> Option<u8> {
+    let fullest = desks.iter().filter_map(|d| d.context).max()?;
+    Some(match fullest {
+        0..=19 => 5,
+        20..=39 => 4,
+        40..=59 => 3,
+        60..=74 => 2,
+        75..=89 => 1,
+        _ => 0,
+    })
+}
+
+/// The `ps` field: the mood's digit and the energy's (`-` unknown).
+pub fn encode_pet(mood: u8, energy: Option<u8>) -> String {
+    let e = energy.map_or('-', |e| char::from(b'0' + e.min(ENERGY_MAX)));
+    format!("{}{e}", mood.min(MOOD_MAX))
 }
 
 /// A span for the detail card: `45s`, `12m`, `2h 5m`.
@@ -1025,5 +1108,64 @@ mod tests {
         assert_eq!((d.context, d.model), (Some(42), 'f'));
         assert!(encode_detail(d).contains("Fable 5.2 - context 42%"));
         assert!(encode_detail(d).ends_with("+120 -7 lines"), "{}", encode_detail(d));
+    }
+
+    #[test]
+    fn the_pets_mood_follows_sessions_left_waiting() {
+        let t = 1000;
+        let evs = [
+            ev(t, "UserPromptSubmit s1 - - a"),
+            ev(t, "UserPromptSubmit s2 - - b"),
+            ev(t + 1, "Notification s2 - permission_prompt b"),
+        ];
+        let d = desks(&evs, t + 2);
+        assert_eq!((d[0].blocked, d[1].blocked), (false, true));
+        // A finished turn waits for you too, for a quarter hour.
+        let done = [ev(t, "Stop s1 - - a")];
+        assert!(desks(&done, t + 600)[0].blocked);
+        assert!(!desks(&done, t + IDLE_TTL_SECS)[0].blocked);
+        // ... but not while its sub-agents still work.
+        let busy = [ev(t, "SubagentStart s1 a1 Explore a"), ev(t + 1, "Stop s1 - - a")];
+        assert!(!desks(&busy, t + 5)[0].blocked);
+
+        let mut mood = PetMood::default();
+        assert_eq!(mood.update(t, &d, false), 2, "neutral to start");
+        // Nothing blocked for a good while: content.
+        let free = desks(&evs[..2], t + 2);
+        let mut now = t;
+        for _ in 0..3600 {
+            now += 1;
+            mood.update(now, &free, false);
+        }
+        assert_eq!(mood.mood(), 4);
+        // Half the team waits while you are away: no blame.
+        for _ in 0..3600 {
+            now += 1;
+            mood.update(now, &d, true);
+        }
+        assert_eq!(mood.mood(), 4);
+        // ... and while you are there: it sours within minutes.
+        for _ in 0..300 {
+            now += 1;
+            mood.update(now, &d, false);
+        }
+        assert!(mood.mood() <= 3);
+        for _ in 0..3600 {
+            now += 1;
+            mood.update(now, &d, false);
+        }
+        assert_eq!(mood.mood(), 0);
+    }
+
+    #[test]
+    fn the_pets_energy_is_the_fullest_sessions_headroom() {
+        let desk = |c| Desk { context: c, ..Desk::default() };
+        assert_eq!(pet_energy(&[]), None);
+        assert_eq!(pet_energy(&[desk(None)]), None, "no status line: the device's own rule");
+        assert_eq!(pet_energy(&[desk(Some(5)), desk(None)]), Some(5));
+        assert_eq!(pet_energy(&[desk(Some(5)), desk(Some(62))]), Some(2));
+        assert_eq!(pet_energy(&[desk(Some(95))]), Some(0));
+        assert_eq!(encode_pet(4, Some(2)), "42");
+        assert_eq!(encode_pet(1, None), "1-");
     }
 }

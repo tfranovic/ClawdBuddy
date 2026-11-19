@@ -137,6 +137,13 @@ pub struct Payload {
     /// leaves `tm` out when both would not fit.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub td: Option<String>,
+    /// The pet's mood and energy as the app works them out
+    /// ([`crate::team::encode_pet`]): two characters, the mood `0`-`4` and
+    /// the energy `0`-`5` (`-` = the device's own rule). Sent when it
+    /// changes (the device keeps the last value); dropped with `aw` when a
+    /// write would not fit. Older firmware ignores it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ps: Option<String>,
     /// 1 = nobody is at the computer (no input for a while): the device
     /// holds an alert instead of timing it out. Sent when it changes and
     /// while it is 1 (the device keeps the last value); the first field
@@ -168,7 +175,8 @@ pub struct Payload {
 /// Every key [`Payload`] can emit, in serialization order.
 pub const PAYLOAD_KEYS: &[&str] = &[
     "s", "sr", "w", "wr", "wf", "st", "acct", "pv", "rc", "rx", "tp", "pd", "rd", "t", "tf", "c", "ok", "b", "m", "x",
-    "a", "e", "es", "n", "lt", "rp", "lv", "aa", "pm", "tv", "tm", "tx", "td", "aw", "k1", "k2", "k3", "th", "fc",
+    "a", "e", "es", "n", "lt", "rp", "lv", "aa", "pm", "tv", "tm", "tx", "td", "ps", "aw", "k1", "k2", "k3", "th",
+    "fc",
 ];
 
 /// The fast-clock keys added in v0.4 (old firmware ignores them).
@@ -386,8 +394,9 @@ impl Payload {
     pub fn encode(&self, limit: usize) -> Vec<u8> {
         let mut data = self.to_json().into_bytes();
         let mut p = self.clone();
-        if data.len() > limit && p.aw.is_some() {
+        if data.len() > limit && (p.aw.is_some() || p.ps.is_some()) {
             p.aw = None;
+            p.ps = None;
             data = p.to_json().into_bytes();
         }
         if data.len() > limit && p.lt.is_some() {
@@ -726,6 +735,7 @@ mod tests {
             td: None,
             // Sent when it changes; a write this full leaves it for the next.
             aw: None,
+            ps: None,
             k1: Some(chord),
             k2: Some(chord),
             k3: Some(chord),
@@ -774,6 +784,7 @@ mod tests {
             tx: Some("w3-f".into()),
             td: Some("a3|api|Working 5s".into()),
             aw: Some(0),
+            ps: Some("42".into()),
             k1: Some(1),
             k2: Some(2),
             k3: Some(6),

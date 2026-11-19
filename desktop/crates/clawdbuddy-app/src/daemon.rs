@@ -183,6 +183,7 @@ pub async fn run(paths: Paths, mut commands: mpsc::UnboundedReceiver<Command>, s
     let mut shown_appearance = None;
     let inbox = AttentionInbox::new(&paths.state_dir);
     let mut team = clawdbuddy_core::team::TeamTracker::new(&paths.state_dir);
+    let mut pet_mood = clawdbuddy_core::team::PetMood::default();
     let (mut tail, seed) = EventTail::open(paths.events_log());
     engine.seed_events(&seed);
     engine.set_hooks_installed(tail.exists());
@@ -280,7 +281,12 @@ pub async fn run(paths: Paths, mut commands: mpsc::UnboundedReceiver<Command>, s
         if engine.on_status_usage(now, &beside.status) {
             log::debug!("usage from a session's status line");
         }
-        engine.set_team(team.poll_with(now, &beside));
+        let office = team.poll_with(now, &beside);
+        let away =
+            clawdbuddy_core::platform::idle_secs().is_some_and(|s| s >= clawdbuddy_core::platform::AWAY_AFTER_SECS);
+        let mood = pet_mood.update(now, &office.desks, away);
+        engine.set_pet(clawdbuddy_core::team::encode_pet(mood, clawdbuddy_core::team::pet_energy(&office.desks)));
+        engine.set_team(office);
         engine.set_away(
             clawdbuddy_core::platform::idle_secs().map(|s| s >= clawdbuddy_core::platform::AWAY_AFTER_SECS),
             SystemTime::now(),

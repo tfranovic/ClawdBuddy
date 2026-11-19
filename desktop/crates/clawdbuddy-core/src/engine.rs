@@ -594,40 +594,45 @@ impl Engine {
     pub fn on_status_usage(&mut self, now: i64, numbers: &HashMap<String, crate::statusline::StatusNumbers>) -> bool {
         let mut changed: Vec<PathBuf> = Vec::new();
         for dir in self.settings.config_dirs.clone() {
-            let newest = numbers
+            // Every session's status line carries the figures of its own
+            // last reply, and an idle session's are old (and can be for a
+            // window that has since rolled over). So all the fresh files
+            // are read, and each window takes the highest figure for the
+            // window the last poll saw.
+            let fresh: Vec<&crate::statusline::StatusNumbers> = numbers
                 .values()
                 .filter(|n| n.config_dir.as_deref() == Some(dir.as_path()))
-                .filter(|n| n.five_hour.is_some() || n.seven_day.is_some())
-                .max_by_key(|n| n.at);
-            let Some(n) = newest else { continue };
-            if now - n.at > crate::statusline::USAGE_FRESH_SECS || self.status_at.get(&dir).is_some_and(|t| *t >= n.at)
-            {
+                .filter(|n| now - n.at <= crate::statusline::USAGE_FRESH_SECS)
+                .collect();
+            let Some(at) = fresh.iter().map(|n| n.at).max() else { continue };
+            if self.status_at.get(&dir).is_some_and(|t| *t >= at) {
                 continue;
             }
-            self.status_at.insert(dir.clone(), n.at);
+            self.status_at.insert(dir.clone(), at);
             let Some(st) = self.accounts.get_mut(&dir) else { continue };
             let Some(mut r) = st.last.clone().filter(|r| r.provider == Provider::Claude && r.spend.is_none()) else {
                 continue;
             };
-            // Within one window usage only rises: a lower figure is an older
-            // one (the status line shows its session's last reply).
-            let newer = |old: Option<&crate::usage::Window>,
-                         w: &crate::statusline::StatusWindow|
-             -> Option<crate::usage::Window> {
-                let resets_at = chrono::DateTime::from_timestamp(w.resets_at, 0).filter(|t| t.timestamp() > now)?;
+            // Only the window the poll saw (the same reset time), and only
+            // upwards: within one window usage never falls. A new window is
+            // the next poll's to report.
+            let higher = |old: Option<&crate::usage::Window>, w: &crate::statusline::StatusWindow| {
+                let old = old?;
+                let same =
+                    old.resets_at.is_some_and(|t| (t.timestamp() - w.resets_at).abs() <= 90 && w.resets_at > now);
                 let pct = w.pct.round().clamp(0.0, 999.0) as u32;
-                let same = old.and_then(|o| o.resets_at).is_some_and(|t| (t.timestamp() - w.resets_at).abs() <= 90);
-                (!(same && old.is_some_and(|o| pct <= o.pct)))
-                    .then_some(crate::usage::Window { pct, resets_at: Some(resets_at) })
+                (same && pct > old.pct).then_some(crate::usage::Window { pct, resets_at: old.resets_at })
             };
             let before = (r.session.clone(), r.week.clone());
-            if !r.no_session_limit() {
-                if let Some(w) = n.five_hour.as_ref().and_then(|w| newer(r.session.as_ref(), w)) {
-                    r.session = Some(w);
+            for n in &fresh {
+                if !r.no_session_limit() {
+                    if let Some(w) = n.five_hour.as_ref().and_then(|w| higher(r.session.as_ref(), w)) {
+                        r.session = Some(w);
+                    }
                 }
-            }
-            if let Some(w) = n.seven_day.as_ref().and_then(|w| newer(r.week.as_ref(), w)) {
-                r.week = Some(w);
+                if let Some(w) = n.seven_day.as_ref().and_then(|w| higher(r.week.as_ref(), w)) {
+                    r.week = Some(w);
+                }
             }
             if before == (r.session.clone(), r.week.clone()) {
                 continue;
@@ -1719,6 +1724,13 @@ mod tests {
         assert!(!e.on_status_usage(T0 + 40, &numbers(T0 + 40, 18.0, reset)));
         assert!(!e.on_status_usage(T0 + 900, &numbers(T0 + 41, 60.0, reset)));
         assert_eq!(e.accounts[&dir].last.as_ref().unwrap().session.as_ref().unwrap().pct, 22);
+        // An idle session's old figures, for another window or a lower
+        // one, never replace a live session's.
+        let mut mixed = numbers(T0 + 45, 30.0, reset);
+        mixed.insert("old".to_owned(), mixed["s1"].clone());
+        mixed.get_mut("old").unwrap().five_hour = Some(StatusWindow { pct: 9.0, resets_at: reset + 7200 });
+        assert!(e.on_status_usage(T0 + 46, &mixed));
+        assert_eq!(e.accounts[&dir].last.as_ref().unwrap().session.as_ref().unwrap().pct, 30);
         // Another account's sessions are not this one's.
         let mut other = numbers(T0 + 50, 70.0, reset);
         other.get_mut("s1").unwrap().config_dir = Some(PathBuf::from("/h/.claude-work"));

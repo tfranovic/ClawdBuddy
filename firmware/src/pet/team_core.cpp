@@ -99,17 +99,68 @@ static long     wall_secs = -1;
 
 static uint32_t rnd(void) { rng = rng * 1664525u + 1013904223u; return rng >> 8; }
 
-static int desk_cx(int slot)  { return COL_W / 2 + (slot % TEAM_DESKS % 3) * COL_W; }
-static int desk_top(int slot) { return ROW_TOP + (slot % TEAM_DESKS / 3) * ROW_H; }
+static uint8_t  skin = TEAM_SKIN_DESKS;
+static uint32_t style_seed = 0;
+
+static int per_office(void) { return skin == TEAM_SKIN_CUBICLES ? TEAM_CUBICLES : TEAM_DESKS; }
+
+// ── the cubicle skin: a + of partitions, one session to a quarter ──
+enum { CUB_ROWS = 0, CUB_ISLAND, CUB_L };       // how a cubicle's desks stand
+static const int CUB_MID_X = 240, CUB_MID_Y = 290;
+static const int CUB_AISLE_L = 219, CUB_AISLE_R = 261;   // either side of the upright partition
+
+// Neighbouring cubicles never match, and the mix changes with the seed.
+static int cub_style(int slot) { return (int)((style_seed + (uint32_t)slot + (uint32_t)(slot / TEAM_CUBICLES)) % 3); }
+static void cub_box(int slot, int* x0, int* y0, int* w, int* h) {
+    const int d = slot % TEAM_CUBICLES;
+    *x0 = d % 2 ? 282 : 4;
+    *w = 194;
+    *y0 = d / 2 ? CUB_MID_Y + 12 : ROW_TOP - 2;
+    *h = d / 2 ? BAR_Y - 4 - *y0 : CUB_MID_Y - 4 - *y0;
+}
+// The sub-agents' column in an L: along the outer wall.
+static int cub_l_col(int slot) {
+    int x0, y0, w, h;
+    cub_box(slot, &x0, &y0, &w, &h);
+    return slot % 2 ? x0 + w - 22 : x0 + 22;
+}
+
+static int desk_cx(int slot) {
+    if (skin != TEAM_SKIN_CUBICLES) return COL_W / 2 + (slot % TEAM_DESKS % 3) * COL_W;
+    int x0, y0, w, h;
+    cub_box(slot, &x0, &y0, &w, &h);
+    if (cub_style(slot) != CUB_L) return x0 + w / 2;
+    return slot % 2 ? x0 + 86 : x0 + w - 86;
+}
+static int desk_top(int slot) {
+    if (skin != TEAM_SKIN_CUBICLES) return ROW_TOP + (slot % TEAM_DESKS / 3) * ROW_H;
+    int x0, y0, w, h;
+    cub_box(slot, &x0, &y0, &w, &h);
+    return y0 + (cub_style(slot) == CUB_ISLAND ? 12 : 2);
+}
 // The aisle a desk's people walk: between the columns, the middle column
 // alternating by row.
 static int desk_aisle(int slot) {
+    if (skin == TEAM_SKIN_CUBICLES) return slot % 2 ? CUB_AISLE_R : CUB_AISLE_L;
     const int d = slot % TEAM_DESKS, col = d % 3;
     return col == 0 ? 160 : col == 2 ? 320 : (d / 3 ? 320 : 160);
 }
 static void seat_of(int slot, int who, int* x, int* y) {
     if (who < 0) { *x = desk_cx(slot); *y = desk_top(slot) + 6; }
+    else if (skin == TEAM_SKIN_CUBICLES && cub_style(slot) == CUB_L) {
+        *x = cub_l_col(slot);
+        *y = desk_top(slot) + 4 + who * 34;
+    } else if (skin == TEAM_SKIN_CUBICLES && cub_style(slot) == CUB_ISLAND) {
+        // Across the island from the lead, backs to us.
+        *x = desk_cx(slot) - 42 + who * 28;
+        *y = desk_top(slot) + 70;
+    }
     else         { *x = desk_cx(slot) - 42 + who * 28; *y = desk_top(slot) + 74; }
+}
+// The aisle nearest a spot on the floor.
+static int aisle_near(float x) {
+    if (skin == TEAM_SKIN_CUBICLES) return x < CUB_MID_X ? CUB_AISLE_L : CUB_AISLE_R;
+    return x < TEAM_W / 2 ? 160 : 320;
 }
 
 // The session at a desk: the one that sits there, else one walking out of it.
@@ -159,7 +210,7 @@ int team_parse(const char* tm, TeamDeskIn* out, int max) {
 // ──────────────── people ────────────────
 static bool present(const Actor* a) { return a->phase != TEAM_OFF && a->phase != TEAM_LEAVE; }
 static bool at_cooler(const Actor* a) { return a->phase == TEAM_TO_COOLER || a->phase == TEAM_COOLER; }
-static bool by_wall(const Actor* a) { return a->y < ROW_TOP - 4; }
+static bool by_wall(const Actor* a) { return a->y < ROW_TOP - 8; }
 
 static void add_wp(Actor* a, int x, int y) {
     if (a->wp_n >= 5) return;
@@ -182,15 +233,19 @@ static void go_spot(Actor* a, int aisle, int spot_x, int spot_y, TeamPhase phase
 
 // To a seat: along the wall to its aisle and down. From another desk, up to
 // the wall first unless the aisle is the same.
+// Sub-agents keep to one side of the aisle or the other, so people going
+// opposite ways pass instead of walking through each other.
+static int lane(int who) { return who < 0 ? 0 : (who % 2 ? 5 : -5); }
+
 static void go_seat(Actor* a, int slot, int who, TeamPhase phase) {
     int sx, sy;
     seat_of(slot, who, &sx, &sy);
-    const int ax = desk_aisle(slot);
+    const int base = desk_aisle(slot), ax = base + lane(who);
     a->wp_n = a->wp_i = 0;
-    const int near = a->x < TEAM_W / 2 ? 160 : 320;
-    if (!by_wall(a) && near != ax) {
-        add_wp(a, near, (int)a->y);
-        add_wp(a, near, HALL_Y);
+    const int near = aisle_near(a->x);
+    if (!by_wall(a) && near != base) {
+        add_wp(a, near + lane(who), (int)a->y);
+        add_wp(a, near + lane(who), HALL_Y);
         add_wp(a, ax, HALL_Y);
     } else {
         add_wp(a, ax, (int)a->y);
@@ -202,7 +257,7 @@ static void go_seat(Actor* a, int slot, int who, TeamPhase phase) {
 
 static void enter(Actor* a, const Desk* d, int who) {
     memset(a, 0, sizeof(*a));
-    a->office = (uint8_t)(d->slot / TEAM_DESKS);
+    a->office = (uint8_t)(d->slot / per_office());
     a->x = (float)DOOR_X;
     a->y = (float)HALL_Y;
     a->small = who >= 0;
@@ -228,7 +283,7 @@ static void move_desk(Desk* d, int slot) {
     for (int who = -1; who < TEAM_SEATS; who++) {
         Actor* a = who < 0 ? &d->lead : &d->sub[who];
         if (!present(a)) continue;
-        if (a->office != slot / TEAM_DESKS) go_spot(a, desk_aisle(old), DOOR_X, HALL_Y, TEAM_MOVE_OUT);
+        if (a->office != slot / per_office()) go_spot(a, desk_aisle(old), DOOR_X, HALL_Y, TEAM_MOVE_OUT);
         else if (a->phase == TEAM_SEAT || a->phase == TEAM_ENTER || a->phase == TEAM_RETURN)
             go_seat(a, slot, who, TEAM_RETURN);
         // At the board or the cooler: they come back to the new desk.
@@ -254,13 +309,53 @@ static bool walk(Actor* a, float dist) {
     return a->wp_i >= a->wp_n;
 }
 
-static void cooler_spot(int slot, int who, int* x, int* y) {
-    // Leads in a row by the cooler, sub-agents a step in front of them.
-    static const int16_t LEAD_X[TEAM_DESKS] = { 344, 412, 322, 432, 300, 454 };
-    if (who < 0) { *x = LEAD_X[slot % TEAM_DESKS]; *y = HALL_Y; return; }
-    *x = COOLER_X - 80 + (int)(rnd() % 96);
-    *y = HALL_Y + 22 + (int)(rnd() % 3) * 4;
-    if (*x > COOLER_X - 22 && *x < COOLER_X + 22) *x += 44;   // not in front of the tap
+// Where someone is standing by the wall, or heading to stand.
+static bool standing_at(const Actor* a, int* x, int* y) {
+    if (a->phase == TEAM_BOARD || a->phase == TEAM_COOLER) { *x = (int)a->x; *y = (int)a->y; return true; }
+    if ((a->phase == TEAM_TO_BOARD || a->phase == TEAM_TO_COOLER) && a->wp_n > 0) {
+        *x = a->wp[a->wp_n - 1][0];
+        *y = a->wp[a->wp_n - 1][1];
+        return true;
+    }
+    return false;
+}
+
+// A place to stand at the board (`cooler` false) or the water cooler: the
+// one farthest from everyone already standing in that office. One row along
+// the wall, shoulder to shoulder; a second row, half a step over, only once
+// the first is taken.
+static void stand_spot(const Actor* self, int office, bool cooler, bool small, int* x, int* y) {
+    static const int16_t BOARD_XS[] = { 226, 182, 270, 160, 248, 204, 292 };
+    static const int16_t COOLER_XS[] = { 348, 436, 326, 458, 304, 414 };
+    const int16_t* xs = cooler ? COOLER_XS : BOARD_XS;
+    const int n = cooler ? 6 : 7;
+    int best = -1, best_x = xs[0], best_y = HALL_Y;
+    for (int row = 0; row < 2; row++) {
+        for (int k = 0; k < n; k++) {
+            const int cx = xs[k] + row * 11, cy = HALL_Y + row * 18 + (small ? 8 : 0);
+            // The second row must keep clear of the cubicles' upright partition.
+            if (row == 1 && skin == TEAM_SKIN_CUBICLES && cx > 216 && cx < 264) continue;
+            int nearest = 999;
+            for (int i = 0; i < TEAM_MAX; i++) {
+                if (!desks[i].used) continue;
+                for (int who = -1; who < TEAM_SEATS; who++) {
+                    const Actor* o = who < 0 ? &desks[i].lead : &desks[i].sub[who];
+                    int ox, oy;
+                    if (o == self || o->office != office || !standing_at(o, &ox, &oy)) continue;
+                    const int dx = ox > cx ? ox - cx : cx - ox, dy = oy > cy ? oy - cy : cy - oy;
+                    // A head shorter or taller on the same line is the same line.
+                    const int dist = dx + (dy <= 8 ? 0 : dy);
+                    if (dist < nearest) nearest = dist;
+                }
+            }
+            // The earlier in the list, the better, when nobody is near.
+            const int score = (nearest > 22 ? 22 : nearest) * 100 - row * 50 - k;
+            if (score > best) { best = score; best_x = cx; best_y = cy; }
+        }
+        if (best >= 22 * 100 - 50) break;       // a clear spot in the first row
+    }
+    *x = best_x;
+    *y = best_y;                                 // a sub-agent's is lower: feet on one line
 }
 
 static int subs_at_cooler(const Desk* d) {
@@ -277,7 +372,7 @@ static int subs_present(const Desk* d) {
 static void step_actor(Actor* a, int who, const Desk* d, uint32_t dt) {
     if (a->phase == TEAM_OFF) return;
     const float dist = SPEED * dt / 1000.0f;
-    const int slot = d->slot, aisle = desk_aisle(slot);
+    const int slot = d->slot, aisle = desk_aisle(slot) + lane(who);
     const int on_break = subs_at_cooler(d);
     switch (a->phase) {
     case TEAM_ENTER:
@@ -287,7 +382,7 @@ static void step_actor(Actor* a, int who, const Desk* d, uint32_t dt) {
     case TEAM_MOVE_OUT:
         // Out of one office's door and in at the other's.
         if (walk(a, dist)) {
-            a->office = (uint8_t)(slot / TEAM_DESKS);
+            a->office = (uint8_t)(slot / per_office());
             go_seat(a, slot, who, TEAM_ENTER);
         }
         break;
@@ -323,20 +418,24 @@ static void step_actor(Actor* a, int who, const Desk* d, uint32_t dt) {
         if (who < 0) {
             int x, y;
             if (d->state == 'b') {
-                cooler_spot(slot, who, &x, &y);
+                stand_spot(a, a->office, true, false, &x, &y);
                 go_spot(a, aisle, x, y, TEAM_TO_COOLER);
             } else if (d->state == 't' && d->think_ms > 3000) {
                 // A thought that lasts takes the lead to the board.
-                go_spot(a, aisle, BOARD_X0 + 20 + (slot % TEAM_DESKS) * 24, HALL_Y, TEAM_TO_BOARD);
+                stand_spot(a, a->office, false, false, &x, &y);
+                go_spot(a, aisle, x, y, TEAM_TO_BOARD);
             }
         } else if (on_break < d->quiet) {
             int x, y;
-            cooler_spot(slot, who, &x, &y);
+            stand_spot(a, a->office, true, true, &x, &y);
             go_spot(a, aisle, x, y, TEAM_TO_COOLER);
         } else if (d->state == 'w' || d->state == 't' || d->state == 'd') {
             a->timer_ms -= (int32_t)dt;
-            if (a->timer_ms <= 0)
-                go_spot(a, aisle, BOARD_X0 + 12 + (int)(rnd() % 136), HALL_Y + (int)(rnd() % 3) * 3, TEAM_TO_BOARD);
+            if (a->timer_ms <= 0) {
+                int x, y;
+                stand_spot(a, a->office, false, true, &x, &y);
+                go_spot(a, aisle, x, y, TEAM_TO_BOARD);
+            }
         }
         break;
     default: break;
@@ -428,15 +527,15 @@ void team_set(const TeamDeskIn* in, int n) {
 static void settle(Actor* a, int slot, int who, bool to_cooler) {
     if (a->phase == TEAM_OFF) return;
     if (a->phase == TEAM_LEAVE) { a->phase = TEAM_OFF; return; }
-    const bool moved = a->office != slot / TEAM_DESKS;
-    a->office = (uint8_t)(slot / TEAM_DESKS);
+    const bool moved = a->office != slot / per_office();
+    a->office = (uint8_t)(slot / per_office());
     if (!moved && a->wp_n > 0 && (a->phase == TEAM_TO_BOARD || a->phase == TEAM_BOARD)) {
         a->x = a->wp[a->wp_n - 1][0];
         a->y = a->wp[a->wp_n - 1][1];
         a->phase = TEAM_BOARD;
     } else if (to_cooler) {
         if (!moved && a->wp_n > 0 && at_cooler(a)) { a->x = a->wp[a->wp_n - 1][0]; a->y = a->wp[a->wp_n - 1][1]; }
-        else { int x, y; cooler_spot(slot, who, &x, &y); a->x = (float)x; a->y = (float)y; }
+        else { int x, y; stand_spot(a, a->office, true, who >= 0, &x, &y); a->x = (float)x; a->y = (float)y; }
         a->phase = TEAM_COOLER;
     } else {
         int sx, sy;
@@ -445,7 +544,10 @@ static void settle(Actor* a, int slot, int who, bool to_cooler) {
         a->y = (float)sy;
         a->phase = TEAM_SEAT;
     }
-    a->wp_i = a->wp_n;
+    // Where they were put is where they are: no path left to be read later.
+    a->wp[0][0] = (int16_t)a->x;
+    a->wp[0][1] = (int16_t)a->y;
+    a->wp_n = a->wp_i = 1;
     a->walking = false;
 }
 
@@ -498,7 +600,27 @@ void team_step(uint32_t dt) {
     }
 }
 
+int team_standing(int office, int* xs, int* ys, int max) {
+    int n = 0;
+    for (int i = 0; i < TEAM_MAX; i++) {
+        if (!desks[i].used) continue;
+        for (int who = -1; who < TEAM_SEATS; who++) {
+            const Actor* a = who < 0 ? &desks[i].lead : &desks[i].sub[who];
+            if (a->office != office || (a->phase != TEAM_BOARD && a->phase != TEAM_COOLER)) continue;
+            if (xs && ys && n < max) { xs[n] = (int)a->x; ys[n] = (int)a->y; }
+            n++;
+        }
+    }
+    return n;
+}
+
 int team_bar_y(void) { return BAR_Y; }
+int team_skin(void) { return skin; }
+int team_per_office(void) { return per_office(); }
+void team_set_seed(uint32_t seed) { style_seed = seed; }
+// Desks are numbered through the offices, so a change of skin moves people
+// between them: call team_snap() after it.
+void team_set_skin(int s) { skin = s == TEAM_SKIN_CUBICLES ? TEAM_SKIN_CUBICLES : TEAM_SKIN_DESKS; }
 void team_set_time(long seconds) { wall_secs = seconds; }
 
 int team_sessions(void) {
@@ -508,7 +630,8 @@ int team_sessions(void) {
 }
 int team_offices(void) {
     const int n = team_sessions();
-    return n <= TEAM_DESKS ? 1 : (n + TEAM_DESKS - 1) / TEAM_DESKS;
+    const int per = per_office();
+    return n <= per ? 1 : (n + per - 1) / per;
 }
 int team_agents(void) {
     int n = 0;
@@ -531,10 +654,16 @@ int team_subs_at_cooler(int slot) {
 void team_desk_info(int office, int desk, TeamDeskInfo* out) {
     memset(out, 0, sizeof(*out));
     out->name = "";
-    if (desk < 0 || desk >= TEAM_DESKS) return;
-    out->name_cx = desk_cx(desk);
-    out->name_y = desk_top(desk) + 111;
-    const Desk* d = at_slot(office * TEAM_DESKS + desk, false);
+    if (desk < 0 || desk >= per_office()) return;
+    const int slot = office * per_office() + desk;
+    out->name_cx = desk_cx(slot);
+    out->name_y = desk_top(slot) + 111;
+    if (skin == TEAM_SKIN_CUBICLES) {
+        int x0, y0, w, h;
+        cub_box(slot, &x0, &y0, &w, &h);
+        out->name_y = y0 + h - 20;
+    }
+    const Desk* d = at_slot(slot, false);
     if (!d) return;
     out->live = true;
     out->name = d->name;
@@ -630,13 +759,13 @@ static int pulse(uint32_t period) {
     return (int)((t < half ? t : period - t) * 255 / half);
 }
 
-typedef enum { POSE_STAND, POSE_SEAT, POSE_SLEEP, POSE_BACK, POSE_CUP } Pose;
+typedef enum { POSE_STAND, POSE_SEAT, POSE_SLEEP, POSE_BACK, POSE_CUP, POSE_SEAT_BACK } Pose;
 
 static void person(const Actor* a, Pose pose) {
     const float k = a->small ? 0.8f : 1.0f;
     const uint16_t skin = SKIN[a->look % 3], hair = HAIR[(a->look / 3) % 4];
     const int style = (a->look / 12) % 3;             // 0 short, 1 long, 2 cropped
-    const bool seated = pose == POSE_SEAT || pose == POSE_SLEEP;
+    const bool seated = pose == POSE_SEAT || pose == POSE_SLEEP || pose == POSE_SEAT_BACK;
     const int stride = a->walking ? (int)(a->dist / 9.0f) & 1 : -1;
     const float x = a->x;
     float y = a->y + (stride == 1 ? -1.0f : 0.0f) + (pose == POSE_SLEEP ? 5.0f : 0.0f);
@@ -675,7 +804,7 @@ static void person(const Actor* a, Pose pose) {
     const float hx = x, hy = y + 7 * k, r = 7.2f * k;
     if (style == 1) rrect((int)(hx - r), (int)hy, (int)(2 * r + 0.5f), (int)(r + 5 * k), 3, hair);
     disc(hx, hy, r, hair);
-    if (pose == POSE_BACK) return;
+    if (pose == POSE_BACK || pose == POSE_SEAT_BACK) return;
     disc(hx, hy + 1.6f * k, r - (style == 2 ? 1.0f : 1.7f) * k, skin);
     if (style == 0) oval(hx - 2 * k, hy - 3.6f * k, 5 * k, 2.6f * k, hair, 255);      // a fringe
     const int ey = (int)(hy + 1.5f * k), eo = (int)(3 * k);
@@ -688,6 +817,8 @@ static void person(const Actor* a, Pose pose) {
     }
 }
 
+static void draw_partitions(void);
+
 static void draw_room(int office) {
     rect(0, 0, TEAM_W, WALL_H, C_WALL);
     rect(0, 0, TEAM_W, 8, C_WALL_T);
@@ -696,6 +827,7 @@ static void draw_room(int office) {
             rect(tx * 40, WALL_H + ty * 40, 40, 40, (tx + ty) & 1 ? C_FLOOR_A : C_FLOOR_B);
     rect(0, WALL_H - 5, TEAM_W, 5, C_BASE);
     shade(0, WALL_H, TEAM_W, 5, C_DARK, 70);
+    if (skin == TEAM_SKIN_CUBICLES) draw_partitions();
 
     // The door people come and go by.
     rrect(DOOR_X - 20, 12, 40, WALL_H - 12, 3, C_DOOR_D);
@@ -768,10 +900,82 @@ static void draw_room(int office) {
     rect(PLANT_X - 13, 56, 26, 5, mix(C_POT, C_WHITE, 50));
 }
 
+static const uint16_t C_PART    = RGB(126, 138, 152);
+static const uint16_t C_PART_HI = RGB(160, 172, 186);
+static const uint16_t C_PART_F  = RGB(88, 98, 112);
+
+// A partition seen from above and a little in front: a top edge and a face.
+static void panel_h(int x, int y, int w) {
+    shade(x, y + 12, w, 4, C_DARK, 70);
+    rect(x, y + 4, w, 9, C_PART_F);
+    rect(x, y, w, 5, C_PART);
+    rect(x, y, w, 1, C_PART_HI);
+}
+static void panel_v(int x, int y, int h) {
+    shade(x + 6, y + 4, 4, h, C_DARK, 60);
+    rect(x, y, 6, h, C_PART);
+    rect(x, y, 1, h, C_PART_HI);
+    rect(x, y + h, 6, 9, C_PART_F);
+}
+
+// The + that makes four cubicles, with a gap either side of its centre for
+// the aisles. The top two are open to the wall, where people stand.
+static void draw_partitions(void) {
+    panel_v(CUB_MID_X - 3, ROW_TOP - 10, BAR_Y - 14 - (ROW_TOP - 10));
+    panel_h(0, CUB_MID_Y - 4, CUB_AISLE_L - 17);
+    panel_h(CUB_AISLE_R + 17, CUB_MID_Y - 4, TEAM_W - CUB_AISLE_R - 17);
+}
+
+static void draw_bench(int cx, int y, uint16_t top_c, uint16_t front_c, uint16_t hi_c) {
+    rrect(cx - 60, y, 120, 13, 4, front_c);
+    rrect(cx - 60, y, 120, 9, 4, top_c);
+    rect(cx - 56, y + 1, 112, 1, hi_c);
+}
+
+// A cubicle's sub-agent desks: a row, the far side of an island, or the
+// upright of an L. They are furniture: there whether or not anyone sits.
+static void draw_cubicle_subs(int slot, const Desk* d, int fade) {
+    const int cx = desk_cx(slot), top = desk_top(slot), style = cub_style(slot);
+    const bool busy = d && (d->state == 'w' || d->state == 't' || d->state == 'd');
+    const uint16_t c_top = mix(C_DESK, C_FLOOR_A, fade), c_front = mix(C_DESK_F, C_FLOOR_A, fade);
+    const uint16_t c_hi = mix(C_DESK_HI, C_FLOOR_A, fade);
+    #define SEATED(i) (d && d->sub[i].phase == TEAM_SEAT && d->sub[i].office == slot / per_office())
+    #define SCREEN(i) (busy ? mix(C_SCREEN, d->sub[i].shirt, 120 + pulse(700 + (i) * 130) / 2) : C_SCREEN)
+    if (style == CUB_ROWS) {
+        for (int i = 0; i < TEAM_SEATS; i++) if (SEATED(i)) person(&d->sub[i], POSE_SEAT);
+        oval(cx, top + 108, 62, 5, C_DARK, 70);
+        draw_bench(cx, top + 94, c_top, c_front, c_hi);
+    } else if (style == CUB_ISLAND) {
+        // Pushed up against the lead's desk, the sub-agents on the near side.
+        oval(cx, top + 76, 62, 5, C_DARK, 70);
+        draw_bench(cx, top + 60, c_top, c_front, c_hi);
+    }
+    for (int i = 0; i < TEAM_SEATS; i++) {
+        int sx, sy;
+        seat_of(slot, i, &sx, &sy);
+        if (style == CUB_L) {
+            if (SEATED(i)) person(&d->sub[i], POSE_SEAT);
+            rrect(sx - 16, sy + 20, 32, 12, 3, c_front);
+            rrect(sx - 16, sy + 20, 32, 8, 3, c_top);
+            if (SEATED(i)) {
+                rrect(sx - 8, sy + 14, 16, 10, 2, C_DIM);
+                rect(sx - 6, sy + 16, 12, 6, SCREEN(i));
+            }
+        } else if (SEATED(i)) {
+            const int ly = style == CUB_ISLAND ? top + 58 : top + 88;
+            rrect(sx - 8, ly, 16, 10, 2, C_DIM);
+            rect(sx - 6, ly + 2, 12, 6, SCREEN(i));
+            if (style == CUB_ISLAND) person(&d->sub[i], POSE_SEAT_BACK);
+        }
+    }
+    #undef SEATED
+    #undef SCREEN
+}
+
 static void draw_desk(int slot) {
     const Desk* d = at_slot(slot, false);
     const bool live = d != NULL;
-    const bool seated = live && d->lead.phase == TEAM_SEAT && d->lead.office == slot / TEAM_DESKS;
+    const bool seated = live && d->lead.phase == TEAM_SEAT && d->lead.office == slot / per_office();
     const int cx = desk_cx(slot), top = desk_top(slot);
     // An empty desk fades into the floor.
     const int fade = live ? 0 : 150;
@@ -819,6 +1023,7 @@ static void draw_desk(int slot) {
     disc(cx + 34, top + 45, 3.2f, DIMMED(RGB(110, 72, 48)));
     #undef DIMMED
 
+    if (skin == TEAM_SKIN_CUBICLES) { draw_cubicle_subs(slot, d, fade); return; }
     if (!live) return;
     // The sub-agents' bench, in front of the desk.
     bool any = false;
@@ -849,7 +1054,7 @@ static void draw_walker(const Actor* a) {
 void team_render(uint16_t* buf, int office) {
     fb = buf;
     draw_room(office);
-    for (int i = 0; i < TEAM_DESKS; i++) draw_desk(office * TEAM_DESKS + i);
+    for (int i = 0; i < per_office(); i++) draw_desk(office * per_office() + i);
     // People on their feet in this office, the ones nearer the wall first.
     const Actor* up[TEAM_MAX * (TEAM_SEATS + 1)];
     int n = 0;

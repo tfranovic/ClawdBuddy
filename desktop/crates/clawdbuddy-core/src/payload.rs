@@ -117,8 +117,9 @@ pub struct Payload {
     /// value it got.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pm: Option<u8>,
-    /// 1 = the agent team view is on (a side tap on the device switches to
-    /// it), 0 = off. The device keeps the last value it got.
+    /// The agent team view (a side tap on the device switches to it): 0 =
+    /// off, 1 = on with desks, 2 = on with cubicles
+    /// ([`crate::config::TeamSkin::code`]). The device keeps the last value it got.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tv: Option<u8>,
     /// The team view's desks ([`crate::team::encode`]); sent only while `tv`
@@ -691,7 +692,7 @@ mod tests {
             lv: Some(5),
             aa: Some(120),
             pm: Some(1),
-            tv: Some(1),
+            tv: Some(2),
             tm: None,
             k1: Some(chord),
             k2: Some(chord),

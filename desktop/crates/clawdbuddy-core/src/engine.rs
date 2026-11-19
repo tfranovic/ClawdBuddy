@@ -672,8 +672,8 @@ impl Engine {
             && self.last_tool.is_some()
             && self.sent_lt != self.last_tool
             && now - self.sent_lt_at >= ACTIVITY_MIN_INTERVAL;
-        let tv = u8::from(self.settings.team_view);
-        let tm_changed = tv == 1
+        let tv = if self.settings.team_view { self.settings.team_skin.code() } else { 0 };
+        let tm_changed = tv != 0
             && self.sent_tm.as_deref() != Some(self.team.as_str())
             && now - self.sent_tm_at >= TEAM_MIN_INTERVAL;
         // A changed device setting goes out right away, like an event.
@@ -730,7 +730,7 @@ impl Engine {
             p.aa = Some(aa);
             p.pm = Some(pm);
             p.tv = Some(tv);
-            if tv == 1 {
+            if tv != 0 {
                 p.tm = Some(self.team.clone());
             }
             [p.k1, p.k2, p.k3] = k.map(Some);
@@ -1583,7 +1583,10 @@ mod tests {
         assert_eq!((w.kind, w.payload.tm.as_deref()), (WriteKind::Event, Some("a3t10api")));
         e.set_team(String::new());
         let w = write(&mut e, T0 + 20).expect("the office emptying is sent too");
-        assert_eq!(w.payload.tm.as_deref(), Some(""));
+        assert_eq!((w.payload.tv, w.payload.tm.as_deref()), (Some(1), Some("")));
+        e.update_settings(settings("team_view = on\nteam_skin = cubicles\n"));
+        let w = write(&mut e, T0 + 21).expect("a change of skin goes out right away");
+        assert_eq!((w.kind, w.payload.tv), (WriteKind::Event, Some(2)));
     }
 
     #[test]

@@ -100,10 +100,16 @@ const ASSETS: &[(&str, &[u8])] = bundled![
     ],
 ];
 
+/// Simulator screenshots of the team view's skins, for the Device page.
+const SKIN_SHOTS: &[(&str, &[u8])] = &[
+    ("skins/desks.png", include_bytes!("../../assets/skins/desks.png")),
+    ("skins/cubicles.png", include_bytes!("../../assets/skins/cubicles.png")),
+];
+
 impl Assets {
     /// The bytes of a bundled asset.
     pub fn get(path: &str) -> Option<&'static [u8]> {
-        ASSETS.iter().find(|(p, _)| *p == path).map(|(_, b)| *b)
+        ASSETS.iter().chain(SKIN_SHOTS).find(|(p, _)| *p == path).map(|(_, b)| *b)
     }
 }
 

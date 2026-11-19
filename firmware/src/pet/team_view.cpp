@@ -36,6 +36,8 @@ static void labels(void) {
     for (int i = 0; i < TEAM_DESKS; i++) {
         TeamDeskInfo d;
         team_desk_info(office, i, &d);
+        // The skin decides where a name goes (and a cubicle office has four).
+        lv_obj_set_pos(lbl_name[i], d.name_cx - 76, d.name_y);
         // Sub-agents the bench has no seat for are counted after the name.
         if (d.more > 0) snprintf(buf, sizeof(buf), "%s  +%d", d.name, d.more);
         else snprintf(buf, sizeof(buf), "%s", d.name);
@@ -120,6 +122,7 @@ void team_view_init(lv_obj_t* scr, int home_bottom) {
     parent = scr;
     pet_bottom = home_bottom;
     team_reset();
+    team_set_seed((uint32_t)micros());
 }
 
 bool team_view_visible(void) { return visible; }
@@ -142,6 +145,11 @@ void team_view_show(bool on) {
 void team_view_on_payload(const UsageData* d) {
     if (d->team_view >= 0) {
         const bool on = d->team_view != 0;
+        if (d->team_skin >= 0 && d->team_skin != team_skin()) {
+            team_set_skin(d->team_skin);
+            team_snap();
+            office = 0;
+        }
         if (enabled && !on) {
             team_view_show(false);
             team_reset();

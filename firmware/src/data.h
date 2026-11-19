@@ -50,6 +50,7 @@ struct UsageData {
     int8_t   liveliness;     // `lv` 1-5 (clamped); -1 = absent (keep the saved level)
     int16_t  attn_anim_s;    // `aa` attention animation, seconds 0-120 (0 = off); -1 = absent
     int8_t   team_view;      // `tv` 1 = the agent team view is on, 0 = off; -1 = absent
+    int8_t   team_skin;      // from `tv`: 0 = desks, 1 = cubicles; -1 = absent or off
     bool     has_team;       // `tm` present
     char     team[224];      // `tm`: the team view's desks (team_core.h)
     int8_t   pace_marker;    // `pm` 1 = pace marker on the usage bars, 0 = off; -1 = absent

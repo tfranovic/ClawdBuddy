@@ -16,7 +16,7 @@ use clawdbuddy_core::autostart::{self, LaunchMode};
 use clawdbuddy_core::buttons::{KeyChord, LabelStyle, MediaKey, Unmappable, MOD_ALT, MOD_CTRL, MOD_GUI, MOD_SHIFT};
 use clawdbuddy_core::config::{
     parse_rgb, AlertOn, AttentionAnim, Button, ButtonAction, ClockMode, ColorToken, ConfigFile, DeviceTheme, Palette,
-    LIVELINESS_MAX,
+    TeamSkin, LIVELINESS_MAX,
 };
 use clawdbuddy_core::platform::{Appearance, AppearanceWatch};
 use clawdbuddy_core::themes::{FollowTheme, FOLLOWING, PRESETS};
@@ -740,7 +740,7 @@ impl SettingsView {
         pane = pane.child(field(
             t,
             "Agent team view",
-            "Adds a second screen: an office with a desk per session and a person per agent. Tap the left or right side of the screen to switch. Needs the pet firmware and the hooks.",
+            "Adds a second screen: an office with a desk per session and a person per agent. Tap the left or right side of the screen to switch.",
             toggle(t, "team-view", team, true, move |_, _, cx| {
                 let _ = me.update(cx, |v, cx| {
                     v.save(|s, _| s.team_view = !team);
@@ -748,6 +748,46 @@ impl SettingsView {
                 });
             }),
         ));
+        if team {
+            let skin = self.settings.team_skin;
+            let mut cards = div().flex().gap(px(12.));
+            for (s, name, about, shot) in [
+                (TeamSkin::Desks, "Desks", "Six open desks to an office", "skins/desks.png"),
+                (TeamSkin::Cubicles, "Cubicles", "Four cubicles to an office", "skins/cubicles.png"),
+            ] {
+                let me = cx.entity().downgrade();
+                let on = s == skin;
+                cards = cards.child(
+                    div()
+                        .id(SharedString::from(format!("team-skin-{}", s.as_str())))
+                        .debug_selector(move || format!("team-skin-{}", s.as_str()))
+                        .flex()
+                        .flex_col()
+                        .gap(px(6.))
+                        .p(px(8.))
+                        .rounded(px(10.))
+                        .border_2()
+                        .border_color(if on { t.accent } else { t.line })
+                        .cursor_pointer()
+                        .hover(|d| d.border_color(t.accent))
+                        .on_click(move |_, _, cx| {
+                            let _ = me.update(cx, |v, cx| {
+                                v.save(|st, _| st.team_skin = s);
+                                cx.notify();
+                            });
+                        })
+                        .child(img(shot).size(px(160.)).rounded(px(6.)))
+                        .child(div().text_size(px(13.)).text_color(if on { t.text } else { t.dim }).child(name))
+                        .child(div().text_size(px(12.)).text_color(t.mute).child(about)),
+                );
+            }
+            pane = pane.child(field_stacked(
+                t,
+                "Office style",
+                "How the team view draws the office. Past the last desk or cubicle, sessions go to a second office.",
+                cards,
+            ));
+        }
         if let Some(buttons) = self.buttons_field(t, board, cx) {
             pane = pane.child(buttons);
         }
@@ -787,6 +827,19 @@ impl SettingsView {
             toggle(t, "update-check", on, true, move |_, _, cx| {
                 let _ = me.update(cx, |v, cx| {
                     v.save(|s, _| s.update_check = !on);
+                    cx.notify();
+                });
+            }),
+        ));
+        let me = cx.entity().downgrade();
+        let unofficial = self.settings.unofficial_releases;
+        pane = pane.child(field(
+            t,
+            "Unofficial releases",
+            "Also offers development builds of the app and the firmware. They are newer and less tested.",
+            toggle(t, "unofficial-releases", unofficial, true, move |_, _, cx| {
+                let _ = me.update(cx, |v, cx| {
+                    v.save(|s, _| s.unofficial_releases = !unofficial);
                     cx.notify();
                 });
             }),
@@ -2658,6 +2711,26 @@ mod tests {
             }
             let _ = std::fs::remove_dir_all(&paths.home);
         }
+    }
+
+    #[gpui::test]
+    fn the_office_style_shows_with_the_team_view_and_saves(cx: &mut TestAppContext) {
+        let paths = home("skin");
+        let p = paths.clone();
+        let (view, cx) = cx.add_window_view(move |_, cx| SettingsView::with_usb(p, Page::Device, false, cx));
+        cx.simulate_resize(gpui::size(px(2400.), px(3200.)));
+        cx.run_until_parked();
+        assert!(cx.debug_bounds("team-skin-cubicles").is_none(), "hidden while the team view is off");
+        view.update(cx, |v, cx| {
+            v.save(|s, _| s.team_view = true);
+            cx.notify();
+        });
+        cx.run_until_parked();
+        let at = cx.debug_bounds("team-skin-cubicles").unwrap().center();
+        cx.simulate_click(at, Modifiers::none());
+        cx.run_until_parked();
+        assert!(std::fs::read_to_string(&paths.config_file).unwrap().contains("team_skin = cubicles"));
+        let _ = std::fs::remove_dir_all(&paths.home);
     }
 
     #[gpui::test]

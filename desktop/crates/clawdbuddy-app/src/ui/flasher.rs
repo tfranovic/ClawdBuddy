@@ -361,13 +361,13 @@ impl FlasherView {
 
     fn fetch_release(&mut self, cx: &mut Context<Self>) {
         self.source = None;
-        let repo = Settings::load(&self.paths)
-            .map(|s| s.release_repo)
-            .unwrap_or_else(|_| clawdbuddy_flash::DEFAULT_RELEASE_REPO.into());
+        let (repo, unofficial) = Settings::load(&self.paths)
+            .map(|s| (s.release_repo, s.unofficial_releases))
+            .unwrap_or_else(|_| (clawdbuddy_flash::DEFAULT_RELEASE_REPO.into(), false));
         run_blocking(
             cx,
             move || {
-                release::release_for_app(&repo, crate::version()).map_err(|e| {
+                release::release_for(&repo, crate::version(), unofficial).map_err(|e| {
                     log::warn!("release check for {repo}: {e} ({})", e.detail().unwrap_or_default());
                     let custom = repo != clawdbuddy_flash::DEFAULT_RELEASE_REPO;
                     let none_yet = matches!(e, release::ReleaseError::NoRelease);

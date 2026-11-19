@@ -363,6 +363,38 @@ pub fn release_for_app(repo: &str, app_version: &str) -> Result<Release, Release
     release_for_app_with(repo, app_version, get_string)
 }
 
+/// [`release_for_app`], or with `unofficial` (the app's "Unofficial
+/// releases" setting) the newest release of all, pre-releases included.
+pub fn release_for(repo: &str, app_version: &str, unofficial: bool) -> Result<Release, ReleaseError> {
+    release_for_with(repo, app_version, unofficial, get_string)
+}
+
+/// [`release_for`] with the HTTP fetch injected (tests).
+fn release_for_with(
+    repo: &str,
+    app_version: &str,
+    unofficial: bool,
+    fetch: impl Fn(&str) -> Result<String, ReleaseError>,
+) -> Result<Release, ReleaseError> {
+    if unofficial {
+        // The highest version published, whatever it is marked as. Nothing
+        // listed (or the list unreadable): what an official app would get.
+        let listed: Vec<GhReleaseNotes> =
+            fetch(&releases_url(repo)).ok().and_then(|j| serde_json::from_str(&j).ok()).unwrap_or_default();
+        let newest = listed.iter().filter(|r| !r.draft).map(|r| r.tag_name.as_str()).reduce(|best, tag| {
+            if crate::manifest::is_newer(tag, best) {
+                tag
+            } else {
+                best
+            }
+        });
+        if let Some(tag) = newest {
+            return release_from_api(&fetch(&tag_url(repo, tag))?, &fetch);
+        }
+    }
+    release_for_app_with(repo, app_version, fetch)
+}
+
 /// [`release_for_app`] with the HTTP fetch injected (tests).
 fn release_for_app_with(
     repo: &str,
@@ -813,6 +845,25 @@ mod tests {
 
     fn manifest(version: &str) -> String {
         MANIFEST.replace("1.9.0", version)
+    }
+
+    #[test]
+    fn unofficial_releases_are_offered_only_when_asked_for() {
+        let fetch = |url: &str| -> Result<String, ReleaseError> {
+            match url {
+                "https://api.github.com/repos/o/r/releases?per_page=30" => Ok(r#"[
+                    {"tag_name":"v0.3.0-dev","draft":true,"prerelease":true},
+                    {"tag_name":"v0.1.1-dev","prerelease":true},
+                    {"tag_name":"v0.1.0"}]"#
+                    .into()),
+                "https://api.github.com/repos/o/r/releases/tags/v0.1.1-dev" => Ok(api("v0.1.1-dev")),
+                "https://api.github.com/repos/o/r/releases/latest" => Ok(api("v0.1.0")),
+                u if u.ends_with("/manifest.json") => Ok(MANIFEST.into()),
+                other => panic!("unexpected fetch {other}"),
+            }
+        };
+        assert_eq!(release_for_with("o/r", "0.1.0", false, fetch).unwrap().tag, "v0.1.0");
+        assert_eq!(release_for_with("o/r", "0.1.0", true, fetch).unwrap().tag, "v0.1.1-dev", "drafts never");
     }
 
     #[test]

@@ -182,6 +182,45 @@ impl ClockMode {
     }
 }
 
+/// `team_skin`: how the agent team view draws its office.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TeamSkin {
+    /// Six open desks to an office (default).
+    #[default]
+    Desks,
+    /// Four cubicles to an office, around a + of partitions.
+    Cubicles,
+}
+
+impl TeamSkin {
+    /// Every skin, in the order the Device page shows them.
+    pub const ALL: [TeamSkin; 2] = [TeamSkin::Desks, TeamSkin::Cubicles];
+
+    /// Parse a config value; anything unknown is the default.
+    pub fn parse(v: &str) -> Self {
+        match v.trim().to_ascii_lowercase().as_str() {
+            "cubicles" => TeamSkin::Cubicles,
+            _ => TeamSkin::Desks,
+        }
+    }
+
+    /// The config-file spelling.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            TeamSkin::Desks => "desks",
+            TeamSkin::Cubicles => "cubicles",
+        }
+    }
+
+    /// The payload's `tv` while the view is on.
+    pub fn code(self) -> u8 {
+        match self {
+            TeamSkin::Desks => 1,
+            TeamSkin::Cubicles => 2,
+        }
+    }
+}
+
 /// `attention_anim`: how long Clawd points and waves on the device when
 /// Claude needs you. Only his animation: the alert itself is unchanged.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -495,6 +534,9 @@ pub struct Settings {
     pub claude_path: Option<PathBuf>,
     /// Daily firmware update check (default on).
     pub update_check: bool,
+    /// Also offer unofficial releases: development builds published as
+    /// pre-releases (`unofficial_releases`, default off).
+    pub unofficial_releases: bool,
     /// The app release the user chose not to be told about (`skipped_update`,
     /// a tag like `v2.5.0`); a later release is announced again.
     pub skipped_update: Option<String>,
@@ -516,6 +558,8 @@ pub struct Settings {
     /// The agent team view on the device (`tv`, default off): sessions as
     /// desks in an office, a side tap away from the meters.
     pub team_view: bool,
+    /// How that view draws its office (default desks); sent in `tv`.
+    pub team_skin: TeamSkin,
     /// The main meter's percentage beside the macOS menu bar icon
     /// (`menu_bar_usage`, default off).
     pub menu_bar_usage: bool,
@@ -683,6 +727,7 @@ impl Settings {
                 .to_owned(),
             claude_path: cfg.get("claude_path").filter(|s| !s.is_empty()).map(|s| paths.expand_tilde(s)),
             update_check: on_off(cfg.get("update_check"), true),
+            unofficial_releases: on_off(cfg.get("unofficial_releases"), false),
             skipped_update: cfg.get("skipped_update").filter(|s| !s.is_empty()).map(str::to_owned),
             skipped_firmware: cfg.get("skipped_firmware").filter(|s| !s.is_empty()).map(str::to_owned),
             alert_on: cfg.get("alert_on").map(AlertOn::parse).unwrap_or_default(),
@@ -691,6 +736,7 @@ impl Settings {
             attention_anim: cfg.get("attention_anim").map(AttentionAnim::parse).unwrap_or_default(),
             pace_marker: on_off(cfg.get("pace_marker"), false),
             team_view: on_off(cfg.get("team_view"), false),
+            team_skin: cfg.get("team_skin").map(TeamSkin::parse).unwrap_or_default(),
             menu_bar_usage: on_off(cfg.get("menu_bar_usage"), false),
             buttons: Button::ALL.map(|b| {
                 cfg.get(b.config_key()).map_or(b.default_action(), |v| ButtonAction::parse(v, b.default_action()))
@@ -794,6 +840,7 @@ impl Settings {
             ("desktop_chime", "", self.desktop_chime, current.desktop_chime),
             ("pace_marker", "", self.pace_marker, current.pace_marker),
             ("team_view", "", self.team_view, current.team_view),
+            ("unofficial_releases", "", self.unofficial_releases, current.unofficial_releases),
             ("alert_project", "", self.alert_project, current.alert_project),
             ("menu_bar_usage", "", self.menu_bar_usage, current.menu_bar_usage),
         ] {
@@ -836,6 +883,9 @@ impl Settings {
         }
         if current.liveliness != self.liveliness {
             cfg.set("liveliness", &self.liveliness.to_string());
+        }
+        if current.team_skin != self.team_skin {
+            cfg.set("team_skin", self.team_skin.as_str());
         }
         if current.attention_anim != self.attention_anim {
             cfg.set("attention_anim", self.attention_anim.as_str());
@@ -1054,6 +1104,8 @@ mod tests {
         assert!(s.alert_chime && s.desktop_chime);
         assert_eq!(settings("clock = weird").clock, ClockMode::Off);
         assert!(settings("").update_check);
+        assert!(!settings("").unofficial_releases);
+        assert!(settings("unofficial_releases = on\n").unofficial_releases);
         assert_eq!(settings("").skipped_update, None);
         assert_eq!(settings("skipped_update = v2.5.0").skipped_update.as_deref(), Some("v2.5.0"));
         assert_eq!(settings("").skipped_firmware, None);
@@ -1101,6 +1153,14 @@ mod tests {
         assert_eq!(cfg.get("button_secondary"), Some("volume-up"));
         assert_eq!(cfg.get("button_pwr"), Some("ctrl+shift+m hold"));
         assert_eq!(Settings::from_config(&cfg, &paths(), None).buttons, s.buttons);
+    }
+
+    #[test]
+    fn team_skin() {
+        assert_eq!(settings("").team_skin, TeamSkin::Desks);
+        assert_eq!(settings("team_skin = Cubicles\n").team_skin, TeamSkin::Cubicles);
+        assert_eq!(settings("team_skin = igloo\n").team_skin, TeamSkin::Desks);
+        assert_eq!((TeamSkin::Desks.code(), TeamSkin::Cubicles.code()), (1, 2));
     }
 
     #[test]

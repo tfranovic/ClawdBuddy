@@ -118,7 +118,10 @@ bool payload_parse(const char* json, UsageData* out, const char** err) {
     }
 
     JsonVariant tv = doc["tv"];
-    d.team_view = tv.isNull() ? -1 : (int8_t)((tv | 0) ? 1 : 0);
+    // 0 off, 1 on with desks, 2 on with cubicles.
+    const int tv_n = tv | 0;
+    d.team_view = tv.isNull() ? -1 : (int8_t)(tv_n ? 1 : 0);
+    d.team_skin = (tv.isNull() || tv_n == 0) ? -1 : (int8_t)(tv_n == 2 ? 1 : 0);
     d.has_team = !doc["tm"].isNull();
     copy_str(d.team, sizeof(d.team), doc["tm"] | "");
     JsonVariant pm = doc["pm"];

@@ -106,6 +106,24 @@ tap the left or right side of the screen.
 **Desks.** Each Claude Code session gets a desk, named after its working
 directory. Sessions sit in the order they started, six to an office.
 
+**Two styles.** The app's Device page offers two looks for the office.
+Everything else on this page works the same in both.
+
+| Desks (the default) | Cubicles |
+| :---: | :---: |
+| ![Six open desks](docs/images/office.png) | ![Four cubicles around a plus-shaped partition](docs/images/office-cubicles.png) |
+| Six sessions to an office | Four sessions to an office, one per cubicle |
+
+In the cubicle style a plus-shaped partition splits the floor into four. Each
+cubicle's desks stand one of three ways, mixed at random each time the board
+starts: the sub-agents in a row in front of the main agent, across an island
+from it, or down the side wall in an L.
+
+![A question in one cubicle, a break at the water cooler](docs/images/office-cubicles-alert.png)
+
+People at the whiteboard and the water cooler each take their own spot along
+the wall, and form a second row only when the first is full.
+
 **The main agent** sits behind the desk:
 
 | You see | It means |
@@ -126,10 +144,11 @@ sub-agent with no activity for 2 minutes waits at the water cooler.
 door. A session leaves when it exits, or 15 minutes after its last turn ended.
 When one leaves, the sessions after it move up a desk.
 
-**More than six sessions.** The seventh opens a second office (twelve sessions
-at most), and the bottom line reads `Office 1 of 2`. Someone whose new desk is
+**More sessions than desks.** The seventh session (the fifth, with cubicles)
+opens another office, up to twelve sessions in all, and the bottom line
+reads `Office 1 of 2`. Someone whose new desk is
 in the other office walks out of one door and in at the other. An office with
-nobody left is removed. While two offices are open, names are cut to 8
+nobody left is removed. With more than six sessions, names are cut to 8
 characters.
 
 **Also on screen:** the wall clock shows the real time, the whiteboard fills
@@ -167,8 +186,7 @@ the session's desk gets the `?`.
 | Anywhere, during an alert | Anywhere | Dismisses the alert |
 | Screensaver | Anywhere | Wakes the pet |
 
-The views form a ring: the pet view, the first office, the second office when
-there is one. With the office view off, a tap anywhere on the pet view raises
+The views form a ring: the pet view, then each office in turn. With the office view off, a tap anywhere on the pet view raises
 the large pet.
 
 The board's BOOT button sends a key to your computer (Space by default); the
@@ -258,6 +276,7 @@ The app's **Device** page sets what the board does:
 | Attention animation | How long the pet stays alert for an alert |
 | Pace marker | Marks the elapsed share of each usage window on the bars |
 | Agent team view | Turns the office view on |
+| Office style | Desks or cubicles, each shown with a picture; appears when the office view is on |
 | Button | What the BOOT button sends to your computer |
 | Alert chime, session reset chime | The board's sounds |
 
@@ -274,6 +293,20 @@ the app:
 | `alert_on` | `permission, question, elicitation` | Which alerts the board shows. Add `idle` for one when a session has waited a minute for your next prompt. |
 | `alert_project` | `on` | Name the waiting session in the alert. `off` shows `Permission needed!` and `Question for you`. |
 | `release_repo` | `tfranovic/ClawdBuddy` | Where the app looks for firmware and app updates. |
+
+### Unofficial releases
+
+Development builds are published as pre-releases on the
+[releases page](https://github.com/tfranovic/ClawdBuddy/releases), with a
+version like `0.1.1-dev`. They have the newest features and the least
+testing. Turn on **Settings → Unofficial releases** and the app offers them
+like any other update: the app itself in the sidebar, the firmware on the
+**Flash** page. Turn it off to go back to official releases only; the app
+then stays on what it has until an official release overtakes it.
+
+Version 0.1.0 has no such switch. To move from it to a development build,
+download that build's app from the releases page once; it then flashes the
+matching firmware.
 
 ### What the app reads and writes
 
@@ -302,6 +335,9 @@ SIM_FAST=1 SIM_SCENARIO=sim/pets-tour.jsonl \
 
 # The office view.
 SIM_FAST=1 SIM_SCENARIO=sim/team.jsonl SIM_TAPS="3000@440,300" .pio/build/sim/program
+
+# The cubicle style.
+SIM_FAST=1 SIM_SCENARIO=sim/team-cubicles.jsonl SIM_TAPS="3000@440,300" .pio/build/sim/program
 
 # Two offices, and desks closing up.
 SIM_FAST=1 SIM_SCENARIO=sim/team-two-offices.jsonl \

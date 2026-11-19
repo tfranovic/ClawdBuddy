@@ -780,9 +780,10 @@ fn spawn_update_checker(paths: Paths, latest: Arc<Mutex<Option<String>>>, now_fl
             let forced = now_flag.swap(false, Ordering::SeqCst);
             let enabled = settings.as_ref().is_none_or(|s| s.update_check);
             if forced || (enabled && check.due(unix_now())) {
+                let unofficial = settings.as_ref().is_some_and(|s| s.unofficial_releases);
                 let repo =
                     settings.map(|s| s.release_repo).unwrap_or_else(|| clawdbuddy_flash::DEFAULT_RELEASE_REPO.into());
-                match clawdbuddy_flash::release::release_for_app(&repo, crate::version()) {
+                match clawdbuddy_flash::release::release_for(&repo, crate::version(), unofficial) {
                     Ok(r) => {
                         log::info!("latest firmware release: {}", r.manifest.version);
                         let _ = std::fs::create_dir_all(&paths.cache_dir);

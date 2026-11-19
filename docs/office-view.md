@@ -58,8 +58,15 @@ The firmware keeps the scene and draws it at 480×480, fifteen times a second
 and the bottom line are text labels over it (`pet/team_view.cpp`).
 
 - Sessions sit in the order the app sends them, which is the order they
-  started: six to an office, at most two offices. Twelve sessions is what
-  fits one Bluetooth write; with more than six, names are cut to 8 characters.
+  started: six to an office with the desks skin, four with cubicles. Twelve
+  sessions is what fits one Bluetooth write (two offices of desks, three of
+  cubicles); with more than six, names are cut to 8 characters.
+- The skin comes in the `tv` field (1 desks, 2 cubicles; `team_skin` in the
+  app's config). In the cubicle skin a plus of partitions makes four
+  cubicles, with a gap either side of its centre where people walk. Each
+  cubicle's sub-agent desks are a row, the far side of an island, or the
+  upright of an L; which cubicle gets which is drawn from a number picked
+  when the board starts, so neighbours never match.
 - When a session leaves, every session after it moves up one desk. A person
   whose new desk is in the other office walks to the door of one and comes in
   at the door of the other.
@@ -79,6 +86,7 @@ time it is shown.
 ```bash
 cd firmware
 SIM_FAST=1 SIM_SCENARIO=sim/team.jsonl SIM_TAPS="3000@440,300" .pio/build/sim/program
+SIM_FAST=1 SIM_SCENARIO=sim/team-cubicles.jsonl SIM_TAPS="3000@440,300" .pio/build/sim/program
 SIM_FAST=1 SIM_SCENARIO=sim/team-two-offices.jsonl \
   SIM_TAPS="3000@440,300;16000@440,300;40000@40,300" .pio/build/sim/program
 ```

@@ -13,43 +13,69 @@ Claude Code runs the app's hook on these events:
 
 | Hook | Used for |
 | --- | --- |
+| `SessionStart`, `SessionEnd` | The session arrived or left; its model |
 | `UserPromptSubmit` | A turn started: the main agent is thinking |
-| `PostToolUse` | A tool ran. Inside a sub-agent the event carries its `agent_id`, which shows that sub-agent is alive |
-| `PreToolUse` (AskUserQuestion), `Notification` | Waiting for you |
-| `Stop`, `StopFailure` | The turn ended |
-| `SubagentStart`, `SubagentStop` | A sub-agent came or went |
-| `SessionEnd` | The session left |
+| `PreToolUse` | A tool started. Until it ends the session is working; an `Agent` call is waiting for sub-agents, the question tool is waiting for you |
+| `PostToolUse`, `PostToolUseFailure` | The tool ended. A failure marked as interrupted ends the turn. Inside a sub-agent the event carries its `agent_id`, which shows that sub-agent is alive |
+| `PermissionRequest`, `Notification` | Waiting for you |
+| `Stop` | The turn ended, and how many agents still run in the background |
+| `StopFailure` | The turn ended on an API error |
+| `SubagentStart`, `SubagentStop` | A sub-agent came or went; its type |
+| `PreCompact`, `PostCompact` | Compacting |
+| `TaskCreated`, `TaskCompleted` | The task list's progress, for the card |
 
 Every call appends one line to `team.log` in the app's folder: the time, the
 event, the session id, the sub-agent id, the tool's name or the notification's
-type, and the name of the working directory. Never a prompt, or a tool's input
-or output.
+type, a few extras (`+pm=plan,tt=Fix_the_login_page,bg=1`: the permission
+mode, the model, the session's title, the agents still running at a Stop, an
+interrupted tool, a StopFailure's error) and the name of the working
+directory. Never a prompt, or a tool's input or output.
 
-The app folds the last hour of that file into the sessions to show
+Two more sources, both optional:
+
+- **The status line.** `clawdbuddy hook statusline` is a Claude Code
+  `statusLine` command. Claude Code hands it each session's context %, model
+  and usage windows after every reply; it keeps them in
+  `statusline/<session id>.json` in the app's folder. The context becomes the
+  paper on the desk.
+- **Claude Code's list of running sessions**, `sessions/<pid>.json` in its
+  config folder (the data behind `claude agents --json`): the process id and
+  a status of busy, idle or waiting. Its format is not documented, so a file
+  that doesn't read as expected is skipped. Where it is newer than the last
+  hook it wins: idle after an interrupt (which has no hook), busy again once
+  a permission was given, waiting before the notification arrives. A session
+  whose process is gone leaves at once.
+
+The app folds the last hour of the log into the sessions to show
 (`desktop/crates/clawdbuddy-core/src/team.rs`) and sends them to the board as
-the `tm` field ([protocol](protocol.md)).
+the `tm` and `tx` fields ([protocol](protocol.md)).
 
 ## A session's state
 
-| State | Sent as | Rule |
-| --- | --- | --- |
-| Working | `w` | The main agent ran a tool in the last 10 seconds |
-| Thinking | `t` | In a turn, no tool call from the main agent for 10 seconds |
-| Waiting | `q` | A permission prompt, a question or an elicitation dialog is up |
-| Delegating | `d` | The turn ended and sub-agents are still running |
-| Idle | `i` | The turn ended, less than 2 minutes ago |
-| On a break | `b` | The turn ended 2 minutes ago or more |
+| State | `tx` | `tm` | Rule |
+| --- | --- | --- | --- |
+| Working | `w` | `w` | A tool is running, or the last one ended within 10 seconds |
+| Thinking | `t` | `t` | In a turn, no tool running |
+| Waiting for you | `q` | `q` | A permission prompt, a question or an elicitation dialog is up |
+| Waiting for sub-agents | `d` | `d` | An `Agent` call is running, or the turn ended and sub-agents still run |
+| Compacting | `c` | `t` | Between `PreCompact` and the next event (10 minutes at most) |
+| Done | `f` | `i` | The turn ended less than 3 minutes ago |
+| Failed | `e` | `i` | The turn ended on an API error |
+| Idle | `i` | `i` | 3 to 6 minutes after the turn ended; or between turns without one having ended (an interrupt), for 2 minutes |
+| On a break | `b` | `b` | After that |
 
-Two things are inferred, because Claude Code has no event for them:
+What is still inferred:
 
-- **Thinking** is "no tool call for 10 seconds", so one long-running command
-  looks the same.
-- **A sub-agent's end** is sometimes not reported. A sub-agent with no event
-  for 10 minutes is taken as gone; after 2 minutes it is counted as quiet and
-  stands at the water cooler.
+- **An interrupt while thinking** has no event. With the list of running
+  sessions it shows at once; without it, a turn with no tool running and no
+  event for 5 minutes is taken as over.
+- **A sub-agent's end** is sometimes not reported. `Stop` says how many still
+  run, and the ones heard from longest ago are dropped to match; otherwise a
+  sub-agent with no event for 10 minutes is taken as gone. After 2 minutes
+  without an event it is counted as quiet and stands at the water cooler.
 
-A session leaves when it exits (`SessionEnd`), 15 minutes after its last turn
-ended, or after an hour without any event.
+A session leaves when it exits (`SessionEnd`), when its process is gone, 15
+minutes after its last turn ended, or after an hour without any event.
 
 ## The scene
 
@@ -72,14 +98,24 @@ and the bottom line are text labels over it (`pet/team_view.cpp`).
   at the door of the other.
 - Each session keeps the shirt colour it was given when it arrived (the one
   fewest sessions were wearing). Sub-agents wear a lighter shade.
-- The main agent goes to the whiteboard after 3 seconds of thinking and comes
-  back when the state changes. Sub-agents visit it at random while their
-  session works.
+- The main agent goes to the whiteboard after 6 seconds of thinking (or of
+  working, in plan mode), stays at least 4 seconds, and comes back when the
+  state changes; a question brings it back at once. Sub-agents visit it at
+  random while their session works.
+- People on their feet who meet step aside for a moment, the one later in
+  the list waiting for the other.
+- A tap is a desk's when it lands on the desk itself (not its bench or its
+  name); the board then asks the app for that desk's card.
+- The context used is a stack of sheets beside the monitor, 42 pixels tall
+  when full, which is the monitor's height.
+- The room's fixed parts (walls, floor, door, board, cooler, plant) are drawn
+  once into a second picture and copied each frame. The time a frame takes
+  is written to the serial log every 300 frames (`team view: N us a frame`).
 - While the view is off screen nobody walks: arrivals are simply at their
   desks the next time it comes up.
 
-The view's picture takes 460 KB of the board's PSRAM, allocated the first
-time it is shown.
+The view's picture and the copy of the room each take 460 KB of the board's
+PSRAM, allocated the first time it is shown.
 
 ## Trying it
 
@@ -87,6 +123,8 @@ time it is shown.
 cd firmware
 SIM_FAST=1 SIM_SCENARIO=sim/team.jsonl SIM_TAPS="3000@440,300" .pio/build/sim/program
 SIM_FAST=1 SIM_SCENARIO=sim/team-cubicles.jsonl SIM_TAPS="3000@440,300" .pio/build/sim/program
+# The finer states, the paper, and a desk's card (the second tap).
+SIM_FAST=1 SIM_SCENARIO=sim/team-states.jsonl SIM_TAPS="3000@440,300;10000@80,170" .pio/build/sim/program
 SIM_FAST=1 SIM_SCENARIO=sim/team-two-offices.jsonl \
   SIM_TAPS="3000@440,300;16000@440,300;40000@40,300" .pio/build/sim/program
 ```

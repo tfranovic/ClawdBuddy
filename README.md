@@ -103,8 +103,10 @@ More detail: [docs/pet-view.md](docs/pet-view.md).
 Off by default. Turn on **Agent team view** on the app's Device page, then
 tap the left or right side of the screen.
 
-**Desks.** Each Claude Code session gets a desk, named after its working
-directory. Sessions sit in the order they started, six to an office.
+**Desks.** Each Claude Code session gets a desk, named after the session's
+title (the one Claude Code shows for it) or, before it has one, its working
+directory. Two sessions that would read the same are numbered (`api`,
+`api 2`). Sessions sit in the order they started, six to an office.
 
 **Two styles.** The app's Device page offers two looks for the office.
 Everything else on this page works the same in both.
@@ -126,14 +128,34 @@ the wall, and form a second row only when the first is full.
 
 **The main agent** sits behind the desk:
 
+![Done, an error, compacting, thinking, and paper for the context used](docs/images/office-states.png)
+
 | You see | It means |
 | --- | --- |
-| Typing, monitor lit with scrolling lines | Running tools |
-| Standing at the whiteboard, writing on it | In a turn with no tool call for 10 seconds: thinking, or one long tool |
+| Typing, monitor lit with scrolling lines | A tool is running, however long it takes, or one just finished |
+| Two gears turning over its head | Thinking: in a turn with no tool running. After six seconds it walks to the whiteboard and writes |
+| At the whiteboard while tools run | Plan mode: the work is a plan |
+| Gears, at the desk | Waiting for its sub-agents, during a turn or after it |
 | A `?` bubble, the name in orange | Waiting for you: a permission prompt or a question |
-| At the desk with thinking dots | Its turn is over, but its sub-agents are still running |
-| Head down under a `z` | Between turns |
-| At the water cooler with a cup | Between turns for 2 minutes or more |
+| A green tick, the name in green | Its turn just ended: your move |
+| A red `!`, the name in red | The turn ended on an API error, such as a usage limit |
+| Arrows pressing in from both sides, a pulsing monitor | Compacting its context |
+| Head down under a `z` | Three minutes after its turn ended |
+| At the water cooler with a cup | Six minutes after its turn ended |
+
+**Paper for the context.** The stack of paper on a desk is how much of its
+context window the session has used: as tall as the monitor when it is full.
+The top sheet turns orange at three quarters and red at nine tenths, and the
+stack sinks while the session compacts. A desk has a mug instead until the
+app knows the figure, which comes from Claude Code's status line (see
+[Settings](#settings)).
+
+**A desk's card.** Tap a desk for the session's full title, what it is doing
+and for how long, the tool running, the model, the context used, its
+sub-agents by type, its task list's progress and the lines it has changed.
+Tap again to close it.
+
+![A desk's card](docs/images/office-card.png)
 
 **Sub-agents** are the smaller people on the bench in front of the desk, in a
 lighter shade of their main agent's colour. Up to four are drawn; `+N` after
@@ -141,8 +163,10 @@ the name counts the rest. Now and then one walks to the whiteboard and back. A
 sub-agent with no activity for 2 minutes waits at the water cooler.
 
 **Coming and going.** Sessions and sub-agents walk in and out through the
-door. A session leaves when it exits, or 15 minutes after its last turn ended.
-When one leaves, the sessions after it move up a desk.
+door. A session arrives when it opens and leaves when it exits, when its
+process is gone, or 15 minutes after its last turn ended. When one leaves,
+the sessions after it move up a desk. A session is the same person in the
+same colour each time it comes in.
 
 **More sessions than desks.** The seventh session (the fifth, with cubicles)
 opens another office, up to twelve sessions in all, and the bottom line
@@ -151,9 +175,18 @@ in the other office walks out of one door and in at the other. An office with
 nobody left is removed. With more than six sessions, names are cut to 8
 characters.
 
-**Also on screen:** the wall clock shows the real time, the whiteboard fills
-with what people write and is wiped when full, and the bottom line counts
-sessions and sub-agents or shows the alert.
+**The bottom line** has the plan's usage on the left (`5h 45%  week 28%`, in
+orange when a limit is used up) and, on the right, the sessions and
+sub-agents in, or the alert.
+
+**No connection.** When the board loses the computer, or hears nothing for a
+minute and a half, the office is shut: lights off, nobody in, and the bottom
+line says so. It opens again as it was when the connection is back.
+
+![The office shut](docs/images/office-shut.png)
+
+**Also on screen:** the wall clock shows the real time, and the whiteboard
+fills with what people write and is wiped when full.
 
 More detail: [docs/office-view.md](docs/office-view.md).
 
@@ -171,8 +204,14 @@ When a session needs you, the board chimes and shows which one:
 | `Stopped on error: my-project` | Another API error ended the turn |
 
 The alert clears when you answer in the terminal, when you tap the screen, or
-after 2 minutes. On the office view the same text shows on the bottom line and
-the session's desk gets the `?`.
+after 2 minutes. On the office view the same text shows on the bottom line,
+the session's desk gets the `?`, and if that desk is in another office the
+view switches to it until the alert ends.
+
+**While you are away.** On macOS the app knows when the keyboard and pointer
+were last used. After three minutes without input an alert no longer times
+out: it waits, and when you are back it chimes again and gets its two minutes
+from then.
 
 ## Controls
 
@@ -182,7 +221,8 @@ the session's desk gets the `?`.
 | Pet view, office view on | Left or right third of the screen | The next or previous view |
 | Large pet | Left or right third | Previous or next species |
 | Large pet | Middle | Back to the meters |
-| Office view | Left or right third | The next or previous view |
+| Office view | A desk | That session's card; any tap closes it |
+| Office view | Left or right third, off a desk | The next or previous view |
 | Anywhere, during an alert | Anywhere | Dismisses the alert |
 | Screensaver | Anywhere | Wakes the pet |
 
@@ -280,7 +320,13 @@ The app's **Device** page sets what the board does:
 | Button | What the BOOT button sends to your computer |
 | Alert chime, session reset chime | The board's sounds |
 
-The **Hooks** page installs and removes the Claude Code hooks. The
+The **Hooks** page installs and removes the Claude Code hooks, each with a
+10-second timeout so a hook that can't start never holds Claude Code up. It
+also sets ClawdBuddy as Claude Code's status line when you have none: one
+line under the prompt (`Fable 5.2 · context 42% · 5h 45% · week 28%`), which
+is how the app learns each session's context and gets the plan's usage after
+every reply. A status line of your own is left alone; the desks then show no
+paper. After updating the app, save the Hooks page once to get the new hooks. The
 **Accounts** page picks which Claude Code account's usage is shown when you
 have more than one.
 
@@ -313,8 +359,16 @@ matching firmware.
 - **Usage** comes from Claude Code's usage endpoint, with the sign-in Claude
   Code already stored.
 - **Hooks** record the event's name, the session id, the sub-agent id, the
-  tool's name or the notification's type, and the name of the working
-  directory. They never record a prompt, a tool's input or its output.
+  tool's name or the notification's type, the name of the working directory,
+  the permission mode, the model, and the session's title as Claude Code
+  shows it. They never record a prompt, a tool's input or its output. The
+  title is text Claude Code wrote about the conversation; it goes to the
+  board and nowhere else.
+- **The status line** command keeps each session's context %, model, usage
+  windows, cost and lines changed.
+- **Claude Code's list of running sessions** (`~/.claude/sessions`) is read
+  to see which sessions are still alive and whether each is busy, idle or
+  waiting.
 - Nothing is sent anywhere except to the board over Bluetooth, and to GitHub
   when the app checks for an update.
 

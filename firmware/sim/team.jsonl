@@ -1,6 +1,6 @@
 # The agent team view: sessions arrive, think, spawn sub-agents, wait, take a
 # break at the water cooler, leave.
-#   SIM_FAST=1 SIM_SCENARIO=sim/team.jsonl SIM_TAPS="3000@440,300" .pio/build/sim_pets/program
+#   SIM_FAST=1 SIM_SCENARIO=sim/team.jsonl SIM_TAPS="3000@440,300" .pio/build/sim/program
 # The tap at the right side switches from the meters to the office.
 {"name":"one session","hold_ms":8000,"w":12.0,"wr":9000,"st":"allowed","ok":true,"acct":"week","t":1785474000,"tf":24,"a":1,"n":1,"tv":1,"tm":"a3w00TestApp"}
 {"name":"two more walk in","hold_ms":9000,"w":12.0,"wr":9000,"st":"allowed","ok":true,"acct":"week","t":1785474008,"tf":24,"a":2,"n":3,"tv":1,"tm":"a3w00TestApp|07t00ClawdBuddy|1cw20api-server"}

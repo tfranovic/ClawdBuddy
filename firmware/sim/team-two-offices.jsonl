@@ -1,6 +1,6 @@
 # The team view with more than six sessions: a second office opens, then a
 # session in the first one leaves and everyone after it moves up a desk.
-#   SIM_FAST=1 SIM_SCENARIO=sim/team-two-offices.jsonl SIM_TAPS="3000@440,300;16000@440,300;40000@40,300" .pio/build/sim_pets/program
+#   SIM_FAST=1 SIM_SCENARIO=sim/team-two-offices.jsonl SIM_TAPS="3000@440,300;16000@440,300;40000@40,300" .pio/build/sim/program
 # Taps: to office 1, on to office 2, back to office 1.
 {"name":"six sessions","hold_ms":10000,"w":12.0,"wr":9000,"st":"allowed","ok":true,"acct":"week","t":1785474000,"tf":24,"a":2,"n":6,"tv":1,"tm":"01w20TestApp|02t00ClawdBud|03w10api-serv|04i00docs|05w00billing|06d30web"}
 {"name":"two more: a second office","hold_ms":16000,"w":12.0,"wr":9000,"st":"allowed","ok":true,"acct":"week","t":1785474010,"tf":24,"a":3,"n":8,"tv":1,"tm":"01w20TestApp|02t00ClawdBud|03w10api-serv|04i00docs|05w00billing|06d30web|07w20infra|08t00mobile"}

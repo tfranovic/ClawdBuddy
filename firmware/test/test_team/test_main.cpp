@@ -18,11 +18,11 @@ static void run(uint32_t ms) {
 
 static void test_parse(void) {
     TeamDeskIn in[TEAM_DESKS];
-    TEST_ASSERT_EQUAL(2, team_parse("a3w20magnemite|07i00ClawdBuddy", in, TEAM_DESKS));
+    TEST_ASSERT_EQUAL(2, team_parse("a3w20TestApp|07i00ClawdBuddy", in, TEAM_DESKS));
     TEST_ASSERT_EQUAL_UINT8(0xa3, in[0].id);
     TEST_ASSERT_EQUAL_CHAR('w', in[0].state);
     TEST_ASSERT_EQUAL_UINT8(2, in[0].subs);
-    TEST_ASSERT_EQUAL_STRING("magnemite", in[0].name);
+    TEST_ASSERT_EQUAL_STRING("TestApp", in[0].name);
     TEST_ASSERT_EQUAL_STRING("ClawdBuddy", in[1].name);
     TEST_ASSERT_EQUAL(0, team_parse("", in, TEAM_DESKS));
     TEST_ASSERT_EQUAL(0, team_parse(NULL, in, TEAM_DESKS));

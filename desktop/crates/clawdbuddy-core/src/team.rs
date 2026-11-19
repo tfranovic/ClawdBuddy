@@ -379,10 +379,10 @@ mod tests {
     #[test]
     fn the_field() {
         let d = vec![
-            Desk { id: 0xa3, state: State::Working, subs: 2, quiet: 1, name: "magnemite".into() },
+            Desk { id: 0xa3, state: State::Working, subs: 2, quiet: 1, name: "TestApp".into() },
             Desk { id: 7, state: State::Break, subs: 0, quiet: 0, name: "ClawdBuddy".into() },
         ];
-        assert_eq!(encode(&d), "a3w21magnemite|07b00ClawdBuddy");
+        assert_eq!(encode(&d), "a3w21TestApp|07b00ClawdBuddy");
         assert_eq!(encode(&[]), "");
         let evs = [ev(10, "UserPromptSubmit s1 - - a-very-long-project-name|x")];
         let name = &desks(&evs, 11)[0].name;

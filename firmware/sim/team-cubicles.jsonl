@@ -1,8 +1,8 @@
 # The office view in the cubicle skin ("tv":2): four sessions to an office,
 # a fifth opens a second one.
 #   SIM_FAST=1 SIM_SCENARIO=sim/team-cubicles.jsonl SIM_TAPS="3000@440,300" .pio/build/sim/program
-{"name":"two sessions","hold_ms":9000,"w":12.0,"wr":9000,"st":"allowed","ok":true,"acct":"week","t":1785474000,"tf":24,"a":2,"n":2,"tv":2,"tm":"a3w20TestApp|07t00ClawdBuddy"}
-{"name":"four: a full office","hold_ms":14000,"w":12.0,"wr":9000,"st":"allowed","ok":true,"acct":"week","t":1785474009,"tf":24,"a":3,"n":4,"tv":2,"tm":"a3w30TestApp|07t00ClawdBuddy|1cw60api-server|42i00docs"}
-{"name":"a question; a break","hold_ms":12000,"w":13.0,"wr":8999,"st":"allowed","ok":true,"acct":"week","t":1785474023,"tf":24,"a":3,"n":4,"tv":2,"tm":"a3q31TestApp|07w10ClawdBuddy|1cd42api-server|42b00docs","m":"Question: TestApp","b":true}
-{"name":"a fifth: a second office","hold_ms":14000,"w":13.0,"wr":8998,"st":"allowed","ok":true,"acct":"week","t":1785474035,"tf":24,"a":3,"n":5,"tv":2,"tm":"a3w30TestApp|07w10ClawdBuddy|1cw40api-server|42w00docs|55w20billing","x":true}
-{"name":"one leaves: they close up","hold_ms":16000,"w":14.0,"wr":8997,"st":"allowed","ok":true,"acct":"week","t":1785474049,"tf":24,"a":2,"n":4,"tv":2,"tm":"a3w30TestApp|1cw40api-server|42t00docs|55w20billing"}
+{"name":"two sessions","hold_ms":9000,"w":12.0,"wr":9000,"st":"allowed","ok":true,"acct":"week","t":1785474000,"tf":24,"a":2,"n":2,"tv":2,"tm":"a3w20TestApp|07t00ClawdBuddy","tx":"wa-otp-o"}
+{"name":"four: a full office","hold_ms":14000,"w":12.0,"wr":9000,"st":"allowed","ok":true,"acct":"week","t":1785474009,"tf":24,"a":3,"n":4,"tv":2,"tm":"a3w30TestApp|07t00ClawdBuddy|1cw60api-server|42i00docs","tx":"wa-otp-owa-of6-f"}
+{"name":"a question; a break","hold_ms":12000,"w":13.0,"wr":8999,"st":"allowed","ok":true,"acct":"week","t":1785474023,"tf":24,"a":3,"n":4,"tv":2,"tm":"a3q31TestApp|07w10ClawdBuddy|1cd42api-server|42b00docs","m":"Question: TestApp","b":true,"tx":"qa-owp-oda-ob6-f"}
+{"name":"a fifth: a second office","hold_ms":14000,"w":13.0,"wr":8998,"st":"allowed","ok":true,"acct":"week","t":1785474035,"tf":24,"a":3,"n":5,"tv":2,"tm":"a3w30TestApp|07w10ClawdBuddy|1cw40api-server|42w00docs|55w20billing","x":true,"tx":"wa-owp-owa-ow6-fw4-o"}
+{"name":"one leaves: they close up","hold_ms":16000,"w":14.0,"wr":8997,"st":"allowed","ok":true,"acct":"week","t":1785474049,"tf":24,"a":2,"n":4,"tv":2,"tm":"a3w30TestApp|1cw40api-server|42t00docs|55w20billing","tx":"wa-owa-ot6-fw4-o"}

@@ -104,6 +104,9 @@ and the bottom line are text labels over it (`pet/team_view.cpp`).
   random while their session works.
 - People on their feet who meet step aside for a moment, the one later in
   the list waiting for the other.
+- While the office is on screen every tap is its own, whatever the pet
+  behind it is doing; only the screensaver, which covers it, takes the tap
+  to wake.
 - A tap is a desk's when it lands on the desk itself (not its bench or its
   name); the board then asks the app for that desk's card.
 - The context used is a stack of sheets beside the monitor, 42 pixels tall
@@ -126,7 +129,7 @@ SIM_FAST=1 SIM_SCENARIO=sim/team-cubicles.jsonl SIM_TAPS="3000@440,300" .pio/bui
 # The finer states, the paper, and a desk's card (the second tap).
 SIM_FAST=1 SIM_SCENARIO=sim/team-states.jsonl SIM_TAPS="3000@440,300;10000@80,170" .pio/build/sim/program
 SIM_FAST=1 SIM_SCENARIO=sim/team-two-offices.jsonl \
-  SIM_TAPS="3000@440,300;16000@440,300;40000@40,300" .pio/build/sim/program
+  SIM_TAPS="3000@440,300;16000@440,100;40000@40,100" .pio/build/sim/program
 ```
 
 A scenario is one JSON payload per line, with a `hold_ms`; edit the `tm`

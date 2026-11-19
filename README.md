@@ -7,7 +7,10 @@ A desk companion for [Claude Code](https://claude.com/claude-code) on a
   Claude Code is doing and tells you which session is waiting for you.
 - **The office view:** every running session as a desk in a small office,
   with its main agent and sub-agents as people who type, think at the
-  whiteboard, wait for you, or take a break at the water cooler.
+  whiteboard, wait for you, or take a break at the water cooler. A stack of
+  paper on each desk shows how much of its context the session has used, a
+  green tick says its turn is done, and a tap on a desk opens a card with
+  the details.
 
 A menu-bar app on your computer reads Claude Code's usage and hook events and
 sends them to the screen over Bluetooth.
@@ -226,6 +229,8 @@ from then.
 | Anywhere, during an alert | Anywhere | Dismisses the alert |
 | Screensaver | Anywhere | Wakes the pet |
 
+On the office view a tap on a desk is that desk's, so to switch views tap a
+side of the screen away from the desks: the wall along the top always works.
 The views form a ring: the pet view, then each office in turn. With the office view off, a tap anywhere on the pet view raises
 the large pet.
 
@@ -390,12 +395,15 @@ SIM_FAST=1 SIM_SCENARIO=sim/pets-tour.jsonl \
 # The office view.
 SIM_FAST=1 SIM_SCENARIO=sim/team.jsonl SIM_TAPS="3000@440,300" .pio/build/sim/program
 
+# The finer states, the paper for context, and a desk's card (the second tap).
+SIM_FAST=1 SIM_SCENARIO=sim/team-states.jsonl SIM_TAPS="3000@440,300;10000@80,170" .pio/build/sim/program
+
 # The cubicle style.
 SIM_FAST=1 SIM_SCENARIO=sim/team-cubicles.jsonl SIM_TAPS="3000@440,300" .pio/build/sim/program
 
 # Two offices, and desks closing up.
 SIM_FAST=1 SIM_SCENARIO=sim/team-two-offices.jsonl \
-  SIM_TAPS="3000@440,300;16000@440,300;40000@40,300" .pio/build/sim/program
+  SIM_TAPS="3000@440,300;16000@440,100;40000@40,100" .pio/build/sim/program
 ```
 
 Click in the window to tap; `esc` quits.

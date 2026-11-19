@@ -56,6 +56,8 @@ struct UsageData {
     char     team_extra[52]; // `tx`: four characters more per desk; "" = absent
     bool     has_detail;     // `td` present
     char     detail[208];    // `td`: one desk's detail card ("a3|title|line|...")
+    int8_t   away;           // `aw` 1 = nobody is at the computer (an alert waits for
+                             //      them instead of timing out), 0 = someone is; -1 = absent
     int8_t   pace_marker;    // `pm` 1 = pace marker on the usage bars, 0 = off; -1 = absent
     int32_t  btn_primary;    // `k1` PRIMARY button action (button_action.h); -1 = absent
     int32_t  btn_secondary;  // `k2` the same for SECONDARY; -1 = absent

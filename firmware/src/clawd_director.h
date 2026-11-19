@@ -32,6 +32,8 @@ void director_tick(void);
 void director_on_payload(const UsageData* d, const SignalsUpdate* sig);
 void director_alert(const char* message);   // attention hook fired
 void director_alert_clear(void);            // the session moved on
+// `aw`: whether anyone is at the computer. An alert does not time out while nobody is.
+void director_set_away(bool away);
 bool director_take_dismissed(void);         // an alert ended on the device since the last call
 
 // Any touch press at screen x (wired internally to LVGL). On the meters it's

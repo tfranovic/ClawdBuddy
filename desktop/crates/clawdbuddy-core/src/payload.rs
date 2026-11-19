@@ -137,6 +137,12 @@ pub struct Payload {
     /// leaves `tm` out when both would not fit.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub td: Option<String>,
+    /// 1 = nobody is at the computer (no input for a while): the device
+    /// holds an alert instead of timing it out. Sent when it changes and
+    /// while it is 1 (the device keeps the last value); the first field
+    /// dropped when a write would not fit. Older firmware ignores it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub aw: Option<u8>,
     /// What the primary button does ([`crate::buttons::ButtonAction::code`]).
     /// The device keeps the last value it got.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -162,7 +168,7 @@ pub struct Payload {
 /// Every key [`Payload`] can emit, in serialization order.
 pub const PAYLOAD_KEYS: &[&str] = &[
     "s", "sr", "w", "wr", "wf", "st", "acct", "pv", "rc", "rx", "tp", "pd", "rd", "t", "tf", "c", "ok", "b", "m", "x",
-    "a", "e", "es", "n", "lt", "rp", "lv", "aa", "pm", "tv", "tm", "tx", "td", "k1", "k2", "k3", "th", "fc",
+    "a", "e", "es", "n", "lt", "rp", "lv", "aa", "pm", "tv", "tm", "tx", "td", "aw", "k1", "k2", "k3", "th", "fc",
 ];
 
 /// The fast-clock keys added in v0.4 (old firmware ignores them).
@@ -380,6 +386,10 @@ impl Payload {
     pub fn encode(&self, limit: usize) -> Vec<u8> {
         let mut data = self.to_json().into_bytes();
         let mut p = self.clone();
+        if data.len() > limit && p.aw.is_some() {
+            p.aw = None;
+            data = p.to_json().into_bytes();
+        }
         if data.len() > limit && p.lt.is_some() {
             p.lt = None;
             data = p.to_json().into_bytes();
@@ -714,6 +724,8 @@ mod tests {
             tm: None,
             tx: None,
             td: None,
+            // Sent when it changes; a write this full leaves it for the next.
+            aw: None,
             k1: Some(chord),
             k2: Some(chord),
             k3: Some(chord),
@@ -761,6 +773,7 @@ mod tests {
             tm: Some("a3w20api".into()),
             tx: Some("w3-f".into()),
             td: Some("a3|api|Working 5s".into()),
+            aw: Some(0),
             k1: Some(1),
             k2: Some(2),
             k3: Some(6),

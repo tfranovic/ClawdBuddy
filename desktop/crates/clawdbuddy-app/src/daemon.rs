@@ -281,6 +281,10 @@ pub async fn run(paths: Paths, mut commands: mpsc::UnboundedReceiver<Command>, s
             log::debug!("usage from a session's status line");
         }
         engine.set_team(team.poll_with(now, &beside));
+        engine.set_away(
+            clawdbuddy_core::platform::idle_secs().map(|s| s >= clawdbuddy_core::platform::AWAY_AFTER_SECS),
+            SystemTime::now(),
+        );
         let alert = inbox.take_alert(SystemTime::now());
         let clears = inbox.take_clears();
         if alert.is_some() || !clears.is_empty() {

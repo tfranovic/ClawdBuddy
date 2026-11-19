@@ -348,6 +348,16 @@ impl AttentionState {
         true
     }
 
+    /// The user is back at the computer: an alert that sat through their
+    /// absence is sent again (message and beep) and gets its full time from
+    /// `now`. Returns whether there was one.
+    pub fn renew(&mut self, now: SystemTime) -> bool {
+        let Some(cur) = self.alert.as_mut() else { return false };
+        cur.at = now;
+        self.alert_unsent = true;
+        true
+    }
+
     /// The device ended the alert itself: forget it without sending a clear.
     pub fn dismissed(&mut self) {
         if !self.alert_unsent {

@@ -158,6 +158,9 @@ pub struct Engine {
     /// The desk the device wants a detail card for.
     detail_want: Option<u8>,
     sent_tx: Option<String>,
+    /// Nobody is at the computer; `None` where that isn't known.
+    away: Option<bool>,
+    sent_aw: Option<u8>,
     /// The newest status-line numbers taken as a reading, per account.
     status_at: HashMap<PathBuf, i64>,
     sent_tm: Option<String>,
@@ -228,6 +231,8 @@ impl Engine {
             desks: Vec::new(),
             detail_want: None,
             sent_tx: None,
+            away: None,
+            sent_aw: None,
             status_at: HashMap::new(),
             sent_tm: None,
             sent_tm_at: 0,
@@ -350,7 +355,20 @@ impl Engine {
 
     /// End an alert past its time to live (see [`AttentionState::expire`]).
     pub fn expire_attention(&mut self, now: SystemTime) -> bool {
+        // Nobody there to see it: it waits for them.
+        if self.away == Some(true) {
+            return false;
+        }
         self.attention.expire(now)
+    }
+
+    /// Whether the user is at the computer (`None`: not known here). An
+    /// alert that sat through an absence is raised again when they return.
+    pub fn set_away(&mut self, away: Option<bool>, now: SystemTime) {
+        if self.away == Some(true) && away == Some(false) && self.attention.renew(now) {
+            log::info!("back at the computer: the waiting alert is raised again");
+        }
+        self.away = away;
     }
 
     /// The device says the user dismissed the alert there (or it timed out).
@@ -373,6 +391,7 @@ impl Engine {
         self.sent_lt = None;
         self.sent_tm = None;
         self.sent_tx = None;
+        self.sent_aw = None;
         self.detail_want = None;
         self.sent_tv = None;
         self.sent_lv = None;
@@ -765,6 +784,7 @@ impl Engine {
         // A changed device setting goes out right away, like an event.
         let aa = self.settings.attention_anim.seconds();
         let pm = u8::from(self.settings.pace_marker);
+        let aw = self.away.map(u8::from);
         let k = self.settings.buttons.map(ButtonAction::code);
         let th = self.colors();
         let clock = clock_fields(self.settings.clock, utc(now), host.utc_offset_secs, host.prefers_12h);
@@ -773,6 +793,7 @@ impl Engine {
             || self.sent_aa != Some(aa)
             || self.sent_pm != Some(pm)
             || self.sent_tv != Some(tv)
+            || (aw.is_some() && self.sent_aw != aw)
             || self.sent_k != Some(k)
             || self.sent_th != Some(th)
             || self.sent_tf != Some(tf);
@@ -816,6 +837,8 @@ impl Engine {
             p.aa = Some(aa);
             p.pm = Some(pm);
             p.tv = Some(tv);
+            // The device keeps it: sent on a change, and while away.
+            p.aw = aw.filter(|a| *a == 1 || self.sent_aw != Some(*a));
             if tv != 0 {
                 p.tm = Some(self.team.clone());
                 p.tx = Some(self.team_extra.clone());
@@ -893,6 +916,9 @@ impl Engine {
         }
         if let Some(tv) = w.payload.tv {
             self.sent_tv = Some(tv);
+        }
+        if w.payload.aw.is_some() {
+            self.sent_aw = w.payload.aw;
         }
         if w.payload.tm.is_some() && (self.sent_tm != w.payload.tm || self.sent_tx != w.payload.tx) {
             self.sent_tm.clone_from(&w.payload.tm);
@@ -1697,6 +1723,34 @@ mod tests {
         let mut other = numbers(T0 + 50, 70.0, reset);
         other.get_mut("s1").unwrap().config_dir = Some(PathBuf::from("/h/.claude-work"));
         assert!(!e.on_status_usage(T0 + 50, &other));
+    }
+
+    #[test]
+    fn an_alert_waits_for_someone_to_see_it() {
+        let mut e = Engine::new(settings(""));
+        e.on_poll_results(T0, vec![(PathBuf::from("/h/.claude"), Ok(reading(15)))]);
+        let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(T0 as u64);
+        assert_eq!(write(&mut e, T0).unwrap().payload.aw, None, "not known: not sent");
+        e.set_away(Some(true), t0);
+        assert_eq!(write(&mut e, T0 + 1).expect("sent when it changes").payload.aw, Some(1));
+        let alert = Alert {
+            message: String::new(),
+            session: "s1".into(),
+            kind: AlertKind::Permission,
+            project: "api".into(),
+            at: t0,
+        };
+        e.on_attention(Some(alert), &HashMap::new());
+        assert!(write(&mut e, T0 + 2).unwrap().payload.m.is_some());
+        // Past its two minutes with nobody there: still up.
+        assert!(!e.expire_attention(t0 + crate::attention::ALERT_TTL * 3));
+        // They are back: raised again, and good for its full time from now.
+        let back = t0 + crate::attention::ALERT_TTL * 3;
+        e.set_away(Some(false), back);
+        let w = write(&mut e, T0 + 400).unwrap();
+        assert_eq!((w.payload.aw, w.payload.m.as_deref()), (Some(0), Some("Permission: api")));
+        assert!(!e.expire_attention(back + Duration::from_secs(60)));
+        assert!(e.expire_attention(back + crate::attention::ALERT_TTL));
     }
 
     fn team(tm: &str) -> crate::team::Team {

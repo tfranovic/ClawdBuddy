@@ -514,6 +514,31 @@ mod portal {
     }
 }
 
+/// Seconds since the user last touched the keyboard, mouse or trackpad, or
+/// `None` where that isn't known (anything but macOS, for now). The app
+/// holds an alert, instead of letting it time out, while nobody is there
+/// to see it.
+#[cfg(target_os = "macos")]
+pub fn idle_secs() -> Option<u64> {
+    #[link(name = "CoreGraphics", kind = "framework")]
+    extern "C" {
+        fn CGEventSourceSecondsSinceLastEventType(state: i32, event_type: u32) -> f64;
+    }
+    // 0: the combined session's state; !0: any input event.
+    // SAFETY: a plain query with no pointers; any arguments are valid.
+    let secs = unsafe { CGEventSourceSecondsSinceLastEventType(0, u32::MAX) };
+    (secs.is_finite() && secs >= 0.0).then_some(secs as u64)
+}
+
+/// Seconds since the user's last input: not known on this system.
+#[cfg(not(target_os = "macos"))]
+pub fn idle_secs() -> Option<u64> {
+    None
+}
+
+/// The user counts as away after this long with no input.
+pub const AWAY_AFTER_SECS: u64 = 180;
+
 #[cfg(test)]
 mod tests {
     use super::*;

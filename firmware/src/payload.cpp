@@ -127,6 +127,8 @@ bool payload_parse(const char* json, UsageData* out, const char** err) {
     copy_str(d.team_extra, sizeof(d.team_extra), doc["tx"] | "");
     d.has_detail = !doc["td"].isNull();
     copy_str(d.detail, sizeof(d.detail), doc["td"] | "");
+    JsonVariant aw = doc["aw"];
+    d.away = aw.isNull() ? -1 : (int8_t)((aw | 0) ? 1 : 0);
     JsonVariant pm = doc["pm"];
     d.pace_marker = pm.isNull() ? -1 : (int8_t)((pm | 0) ? 1 : 0);
     d.btn_primary   = button_field(doc["k1"]);

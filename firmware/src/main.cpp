@@ -620,6 +620,7 @@ void loop() {
                 idle_note_activity();
             if (usage.liveliness > 0) liveliness_set(usage.liveliness);
             if (usage.attn_anim_s >= 0) attn_anim_set(usage.attn_anim_s);
+            if (usage.away >= 0) director_set_away(usage.away == 1);
             director_on_payload(&usage, &sig);
             pet_on_payload(&usage, &sig);
             if (usage.alert_msg[0]) {

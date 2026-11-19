@@ -46,6 +46,7 @@ static bool     notice_wake = false;  // B_FACE_HOME: blink first (he noticed yo
 
 // Attention
 static bool     attention_on = false;
+static bool     user_away = false;        // `aw`: nobody at the computer to see an alert
 static bool     attention_dismissed = false;  // ended here; the app hasn't heard
 static bool     pairing_touch = false;        // director_set_pairing_touch
 static uint32_t attention_since = 0;
@@ -216,6 +217,13 @@ void director_alert(const char* message) {
 }
 
 void director_alert_clear(void) { end_attention(ATTN_END_CLEAR); }
+
+void director_set_away(bool away) {
+    // Back while an alert waited without the app saying so again (an older
+    // app): it gets its time from now.
+    if (user_away && !away && attention_on) attention_since = now_ms();
+    user_away = away;
+}
 
 bool director_take_dismissed(void) {
     const bool d = attention_dismissed;
@@ -587,7 +595,9 @@ static void run_attention(uint32_t now) {
             }
             if (mascot_away()) mascot_return(-1, 150);   // arrived here with him out of sight
         }
-        if ((uint32_t)(now - attention_since) >= clawd_tuning().alert_timeout_ms)
+        // With nobody at the computer the alert waits: the app raises it
+        // again (and the clock starts over) when they are back.
+        if (!user_away && (uint32_t)(now - attention_since) >= clawd_tuning().alert_timeout_ms)
             end_attention(ATTN_END_TIMEOUT);
         return;
     }

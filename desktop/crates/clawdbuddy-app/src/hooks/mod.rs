@@ -57,6 +57,11 @@ pub enum Action {
     Event,
     /// Only the team line every invocation writes (`team.log`).
     Team,
+    /// `PreToolUse` for every tool: the team line, and for AskUserQuestion
+    /// the alert and the event too (a question is waiting).
+    Tool,
+    /// Write the status line's numbers and print the line (`statusline`).
+    StatusLine,
     /// Unknown or missing: do nothing (still exit 0).
     None,
 }
@@ -69,6 +74,7 @@ impl Mode {
             Some("clear") => Action::Clear,
             Some("event") => Action::Event,
             Some("team") => Action::Team,
+            Some("tool") => Action::Tool,
             _ => Action::None,
         };
         Mode { action, log_too: args.get(1).map(String::as_str) == Some("event") }
@@ -89,10 +95,12 @@ pub fn run(mode: Mode, input: &str, state_dir: &Path, now_unix: u64) {
     let _ = write_last_tool(&v, state_dir);
     let _ = log_team(&v, state_dir, now_unix);
     let _ = match mode.action {
+        Action::Alert if informational(&v) => Ok(()),
         Action::Alert => write_alert(&v, state_dir),
         Action::Clear => touch_clear(&v, state_dir),
         Action::Event => log_event(&v, state_dir, now_unix),
-        Action::Team | Action::None => Ok(()),
+        Action::Tool if is_question(&v) => log_event(&v, state_dir, now_unix).and(write_alert(&v, state_dir)),
+        Action::Tool | Action::Team | Action::StatusLine | Action::None => Ok(()),
     };
 }
 
@@ -161,11 +169,133 @@ fn log_event(v: &Value, dir: &Path, now_unix: u64) -> io::Result<()> {
 /// `team.log` rolls over once it is larger than this.
 pub const TEAM_ROLL_BYTES: u64 = 131_072;
 
+/// A notification that asks nothing of the user: a sign-in that worked, an
+/// answered MCP request, a background session finishing, quota messages.
+fn informational(v: &Value) -> bool {
+    v.get("hook_event_name").and_then(Value::as_str) == Some("Notification")
+        && matches!(
+            v.get("notification_type").and_then(Value::as_str),
+            Some(
+                "auth_success"
+                    | "elicitation_complete"
+                    | "elicitation_response"
+                    | "agent_completed"
+                    | "quota_auto_resume_fired"
+                    | "quota_auto_resume_stale"
+                    | "quota_auto_resume_disabled"
+                    | "plugin_notification"
+            )
+        )
+}
+
+/// A `PreToolUse` for AskUserQuestion: Claude is asking the user something.
+fn is_question(v: &Value) -> bool {
+    v.get("hook_event_name").and_then(Value::as_str) == Some("PreToolUse")
+        && v.get("tool_name").and_then(Value::as_str) == Some("AskUserQuestion")
+}
+
+/// A session title's longest form in `team.log`.
+pub const TITLE_LIMIT: usize = 40;
+
+/// A title as one token: ASCII, spaces as `_`, nothing a line or the
+/// extras' separators could be confused by.
+fn title_token(title: &str) -> Option<String> {
+    let ascii = clawdbuddy_core::attention::to_ascii(title.trim(), TITLE_LIMIT);
+    let t: String = ascii
+        .chars()
+        .map(|c| if c == ' ' { '_' } else { c })
+        .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-'))
+        .collect();
+    let t = t.trim_matches('_').to_owned();
+    (!t.is_empty()).then_some(t)
+}
+
+/// The title Claude Code gave the session, from the end of its transcript
+/// (the `ai-title` records), for a hook input that carries none.
+fn transcript_title(path: &Path) -> Option<String> {
+    use std::io::{Read as _, Seek as _, SeekFrom};
+    const TAIL: u64 = 96 * 1024;
+    let mut f = File::open(path).ok()?;
+    let len = f.metadata().ok()?.len();
+    f.seek(SeekFrom::Start(len.saturating_sub(TAIL))).ok()?;
+    let mut buf = Vec::new();
+    f.take(TAIL).read_to_end(&mut buf).ok()?;
+    let text = String::from_utf8_lossy(&buf);
+    let line = text.lines().rev().find(|l| l.contains("\"aiTitle\""))?;
+    serde_json::from_str::<Value>(line).ok()?.get("aiTitle")?.as_str().map(str::to_owned)
+}
+
+/// Background work still running when a turn ends that keeps a session
+/// busy: sub-agents, workflows and teammates in `background_tasks` (not
+/// shells or monitors, which can run for a whole session). `None` when the
+/// input has no such list (an older Claude Code).
+fn background_agents(obj: &Map<String, Value>) -> Option<usize> {
+    let tasks = obj.get("background_tasks")?.as_array()?;
+    Some(
+        tasks
+            .iter()
+            .filter(|t| {
+                let kind = t.get("type").and_then(Value::as_str).unwrap_or("").to_ascii_lowercase();
+                let done = matches!(
+                    t.get("status").and_then(Value::as_str).unwrap_or(""),
+                    "completed" | "done" | "failed" | "stopped" | "killed" | "cancelled"
+                );
+                !done && (kind.contains("agent") || kind.contains("workflow") || kind.contains("teammate"))
+            })
+            .count(),
+    )
+}
+
+/// What else the team view reads from an event, as `+k=v,k=v`: the
+/// permission mode (`pm`), the model (`md`), the session's title (`tt`),
+/// the agents still running in the background at a Stop (`bg`), a tool call
+/// the user interrupted (`int`), a StopFailure's error (`er`). Names and
+/// counts only, never a prompt or a tool's input or output; the title is
+/// the one Claude Code shows for the session.
+fn team_extras(obj: &Map<String, Value>, event: &str, main_agent: bool) -> Option<String> {
+    let text = |k: &str| obj.get(k).and_then(Value::as_str).map(sanitize).filter(|s| !s.is_empty());
+    let mut out: Vec<String> = Vec::new();
+    if let Some(m) = text("permission_mode") {
+        out.push(format!("pm={m}"));
+    }
+    let model = match event {
+        "SessionStart" => text("model"),
+        "PostModelSwitch" => text("to_model"),
+        _ => None,
+    };
+    if let Some(m) = model {
+        out.push(format!("md={m}"));
+    }
+    if main_agent && matches!(event, "SessionStart" | "UserPromptSubmit" | "Stop") {
+        let given =
+            obj.get("session_title").and_then(Value::as_str).filter(|t| !t.trim().is_empty()).map(str::to_owned);
+        let title = given.or_else(|| transcript_title(Path::new(obj.get("transcript_path").and_then(Value::as_str)?)));
+        if let Some(t) = title.as_deref().and_then(title_token) {
+            out.push(format!("tt={t}"));
+        }
+    }
+    if main_agent && event == "Stop" {
+        if let Some(n) = background_agents(obj) {
+            out.push(format!("bg={n}"));
+        }
+    }
+    if obj.get("is_interrupt").and_then(Value::as_bool) == Some(true) {
+        out.push("int=1".into());
+    }
+    if event == "StopFailure" {
+        if let Some(e) = text("error") {
+            out.push(format!("er={e}"));
+        }
+    }
+    (!out.is_empty()).then(|| format!("+{}", out.join(",")))
+}
+
 /// The team view's line (`clawdbuddy_core::team`):
-/// `<ts> <event> <session> <agent|-> <detail|-> <project>`. The agent is the
-/// sub-agent's id when the hook fired inside one. The detail is the tool's
-/// name, the notification's type or the sub-agent's type, never an input or
-/// an output. `None` without a session id.
+/// `<ts> <event> <session> <agent|-> <detail|-> [+extras] <project>`. The
+/// agent is the sub-agent's id when the hook fired inside one. The detail is
+/// the tool's name, the notification's type or the sub-agent's type, never an
+/// input or an output; the extras are [`team_extras`]. `None` without a
+/// session id.
 pub fn team_line(v: &Value, now_unix: u64) -> Option<String> {
     let obj = v.as_object()?;
     let text = |k: &str| obj.get(k).and_then(Value::as_str).map(sanitize).filter(|s| !s.is_empty());
@@ -173,9 +303,12 @@ pub fn team_line(v: &Value, now_unix: u64) -> Option<String> {
     let sid = text("session_id")?;
     let agent = text("agent_id");
     let detail = text("tool_name").or_else(|| text("notification_type")).or_else(|| text("agent_type"));
+    // A project whose name starts with `+` would read as extras.
     let project = project_of(obj.get("cwd")).unwrap_or_default();
+    let project = project.trim_start_matches('+');
+    let extras = team_extras(obj, &event, agent.is_none()).map(|e| e + " ").unwrap_or_default();
     let dash = |o: Option<String>| o.unwrap_or_else(|| "-".to_owned());
-    Some(format!("{now_unix} {event} {sid} {} {} {project}\n", dash(agent), dash(detail)))
+    Some(format!("{now_unix} {event} {sid} {} {} {extras}{project}\n", dash(agent), dash(detail)))
 }
 
 fn log_team(v: &Value, dir: &Path, now_unix: u64) -> io::Result<()> {

@@ -273,7 +273,11 @@ pub async fn run(paths: Paths, mut commands: mpsc::UnboundedReceiver<Command>, s
         }
         engine.set_hooks_installed(tail.exists());
         engine.set_last_tool(clawdbuddy_core::attention::read_last_tool(&paths.state_dir));
-        engine.set_team(team.poll(now));
+        let beside = clawdbuddy_core::team::Beside {
+            status: clawdbuddy_core::statusline::read_all(&paths.state_dir, now),
+            running: clawdbuddy_core::sessions::read_all(&engine.settings().config_dirs),
+        };
+        engine.set_team(team.poll_with(now, &beside));
         let alert = inbox.take_alert(SystemTime::now());
         let clears = inbox.take_clears();
         if alert.is_some() || !clears.is_empty() {
@@ -298,6 +302,7 @@ pub async fn run(paths: Paths, mut commands: mpsc::UnboundedReceiver<Command>, s
                         log::info!("attention alert dismissed on the device");
                         engine.on_device_dismissed();
                     }
+                    DeviceEvent::Detail(desk) => engine.on_device_detail(desk),
                 }
             }
         }

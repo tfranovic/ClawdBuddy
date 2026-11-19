@@ -30,22 +30,37 @@ pub struct HookSpec {
     pub args: &'static str,
 }
 
-/// The six hooks: the attention card's four, Stop, and StopFailure (fired in
-/// Stop's place when an API error such as a usage limit ends the turn: it
-/// alerts, and ends the turn for the activity tracker), all logging events.
+/// Seconds Claude Code waits for one hook call. The hook takes a few
+/// milliseconds; this only bounds the damage when the binary can't start
+/// (a stuck first launch held every hook call up for its default minute).
+pub const HOOK_TIMEOUT_SECS: u64 = 10;
+
+/// The hooks. The attention card's and the activity tracker's: a prompt, a
+/// tool finishing or failing (which also end a wait), Stop and StopFailure
+/// (fired in Stop's place when an API error such as a usage limit ends the
+/// turn: it alerts), notifications, a permission dialog opening (the
+/// notification for it comes seconds later), and every tool starting (the
+/// question tool alerts).
 ///
-/// Then three for the team view, which only write `team.log`: sub-agents
-/// starting and stopping, and the session ending.
-pub const HOOKS: [HookSpec; 9] = [
+/// The rest only write `team.log` for the team view: sub-agents starting and
+/// stopping, the session starting and ending, compaction, the task list.
+pub const HOOKS: [HookSpec; 16] = [
     HookSpec { event: "UserPromptSubmit", matcher: None, args: "clear event" },
     HookSpec { event: "PostToolUse", matcher: None, args: "clear event" },
+    HookSpec { event: "PostToolUseFailure", matcher: None, args: "clear" },
     HookSpec { event: "Stop", matcher: None, args: "event" },
     HookSpec { event: "StopFailure", matcher: None, args: "alert event" },
     HookSpec { event: "Notification", matcher: None, args: "alert event" },
-    HookSpec { event: "PreToolUse", matcher: Some("AskUserQuestion"), args: "alert event" },
+    HookSpec { event: "PermissionRequest", matcher: None, args: "alert" },
+    HookSpec { event: "PreToolUse", matcher: None, args: "tool" },
     HookSpec { event: "SubagentStart", matcher: None, args: "team" },
     HookSpec { event: "SubagentStop", matcher: None, args: "team" },
+    HookSpec { event: "SessionStart", matcher: None, args: "team" },
     HookSpec { event: "SessionEnd", matcher: None, args: "team" },
+    HookSpec { event: "PreCompact", matcher: None, args: "team" },
+    HookSpec { event: "PostCompact", matcher: None, args: "team" },
+    HookSpec { event: "TaskCreated", matcher: None, args: "team" },
+    HookSpec { event: "TaskCompleted", matcher: None, args: "team" },
 ];
 
 /// The binary hooks should run: the path that outlives this process (an
@@ -154,7 +169,7 @@ pub fn owner(cmd: &str) -> Owner {
         return Owner::Foreign;
     }
     let args: Vec<&str> = words.collect();
-    if !matches!(args.first(), Some(&"alert" | &"clear" | &"event" | &"team")) {
+    if !matches!(args.first(), Some(&"alert" | &"clear" | &"event" | &"team" | &"tool")) {
         return Owner::Foreign;
     }
     // `clawdmeter` is this app under its former name: ours, and stale, so
@@ -262,6 +277,7 @@ pub fn merge(text: Option<&str>, exe: &Path) -> Result<String, HookError> {
                 }
                 first = false;
                 h["command"] = Value::String(cmd.clone());
+                h["timeout"] = json!(HOOK_TIMEOUT_SECS);
                 if h.get("type").is_none() {
                     h["type"] = Value::String("command".into());
                 }
@@ -285,7 +301,7 @@ pub fn merge(text: Option<&str>, exe: &Path) -> Result<String, HookError> {
             if let Some(m) = spec.matcher {
                 g.insert("matcher".into(), Value::String(m.to_owned()));
             }
-            g.insert("hooks".into(), json!([{ "type": "command", "command": cmd }]));
+            g.insert("hooks".into(), json!([{ "type": "command", "command": cmd, "timeout": HOOK_TIMEOUT_SECS }]));
             list.push(Value::Object(g));
         }
     }
@@ -389,6 +405,7 @@ pub fn status(text: Option<&str>, exe: &Path) -> HookStatus {
             .filter(|g| group_matcher(g) == spec.matcher)
             .filter_map(|g| g.get("hooks").and_then(Value::as_array))
             .flatten()
+            .filter(|h| h.get("timeout").and_then(Value::as_u64) == Some(HOOK_TIMEOUT_SECS))
             .filter_map(command_of)
             .any(|c| matches!(owner(c), Owner::Ours { args, .. } if args == spec.args))
     });
@@ -584,8 +601,16 @@ mod tests {
         let out = merge(None, exe()).unwrap();
         let j = v(&out);
         assert_eq!(j["hooks"]["Stop"][0]["hooks"][0]["command"], format!("{EXE} hook event"));
-        assert_eq!(j["hooks"]["PreToolUse"][0]["matcher"], "AskUserQuestion");
+        // Every tool's start, so no matcher; the hook itself knows a question.
+        assert!(j["hooks"]["PreToolUse"][0].get("matcher").is_none());
+        assert_eq!(j["hooks"]["PreToolUse"][0]["hooks"][0]["command"], format!("{EXE} hook tool"));
         assert_eq!(j["hooks"]["PostToolUse"][0]["hooks"][0]["type"], "command");
+        assert_eq!(j["hooks"]["PostToolUse"][0]["hooks"][0]["timeout"], HOOK_TIMEOUT_SECS);
+        // An install without the timeout is brought up to date.
+        let bare = out.replace(&format!(",\n            \"timeout\": {HOOK_TIMEOUT_SECS}"), "");
+        assert_ne!(bare, out);
+        assert_eq!(status(Some(&bare), exe()), HookStatus::Partial);
+        assert_eq!(merge(Some(&bare), exe()).unwrap(), out);
         assert_eq!(status(Some(&out), exe()), HookStatus::Installed);
         assert_eq!(status(None, exe()), HookStatus::Missing);
         assert_eq!(merge(Some(&out), exe()).unwrap(), out, "idempotent");
@@ -615,7 +640,9 @@ mod tests {
         assert_eq!(post[0]["hooks"][0]["command"], "prettier --write");
         assert_eq!(post[1]["hooks"][0]["command"], format!("{EXE} hook clear event"));
         assert_eq!(j["hooks"]["Notification"].as_array().unwrap().len(), 1);
-        assert_eq!(j["hooks"]["PreToolUse"][0]["hooks"][0]["command"], format!("{EXE} hook alert event"));
+        // The question-only hook becomes the one for every tool.
+        assert_eq!(j["hooks"]["PreToolUse"][0]["hooks"][0]["command"], format!("{EXE} hook tool"));
+        assert!(j["hooks"]["PreToolUse"][0].get("matcher").is_none());
         assert!(!out.contains(LEGACY_SCRIPT));
         assert_eq!(status(Some(&out), exe()), HookStatus::Installed);
     }
@@ -643,18 +670,19 @@ mod tests {
 
     #[test]
     fn never_retargets_someone_elses_group() {
-        // Our hook shares a matcher-less PreToolUse group with a user hook:
-        // setting the matcher would narrow theirs, so ours moves out.
-        let before = r#"{"hooks": {"PreToolUse": [{"hooks": [
+        // Our hook shares a "Bash" PreToolUse group with a user hook:
+        // dropping the matcher would widen theirs, so ours moves out.
+        let before = r#"{"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [
             {"type": "command", "command": "audit-log"},
             {"type": "command", "command": "/x/attention-hook.sh alert"}]}]}}"#;
         let j = v(&merge(Some(before), exe()).unwrap());
         let pre = j["hooks"]["PreToolUse"].as_array().unwrap();
         assert_eq!(pre.len(), 2);
-        assert!(pre[0].get("matcher").is_none());
+        assert_eq!(pre[0]["matcher"], "Bash");
         assert_eq!(pre[0]["hooks"].as_array().unwrap().len(), 1);
         assert_eq!(pre[0]["hooks"][0]["command"], "audit-log");
-        assert_eq!(pre[1]["matcher"], "AskUserQuestion");
+        assert!(pre[1].get("matcher").is_none());
+        assert_eq!(pre[1]["hooks"][0]["command"], format!("{EXE} hook tool"));
     }
 
     #[test]

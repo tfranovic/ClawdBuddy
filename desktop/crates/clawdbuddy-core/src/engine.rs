@@ -152,6 +152,12 @@ pub struct Engine {
     sent_lt_at: i64,
     /// The team view's desks (`tm`), and what the device last got.
     team: String,
+    /// `tx`, and the desks both came from (for a detail card).
+    team_extra: String,
+    desks: Vec<crate::team::Desk>,
+    /// The desk the device wants a detail card for.
+    detail_want: Option<u8>,
+    sent_tx: Option<String>,
     sent_tm: Option<String>,
     sent_tm_at: i64,
     sent_tv: Option<u8>,
@@ -216,6 +222,10 @@ impl Engine {
             sent_lt: None,
             sent_lt_at: 0,
             team: String::new(),
+            team_extra: String::new(),
+            desks: Vec::new(),
+            detail_want: None,
+            sent_tx: None,
             sent_tm: None,
             sent_tm_at: 0,
             sent_tv: None,
@@ -317,9 +327,16 @@ impl Engine {
         }
     }
 
-    /// The team view's desks ([`crate::team::TeamTracker::poll`]).
-    pub fn set_team(&mut self, tm: String) {
-        self.team = tm;
+    /// The team view's desks ([`crate::team::TeamTracker::poll_with`]).
+    pub fn set_team(&mut self, team: crate::team::Team) {
+        self.team = team.tm;
+        self.team_extra = team.tx;
+        self.desks = team.desks;
+    }
+
+    /// The device asks for a desk's detail card (a tap on it).
+    pub fn on_device_detail(&mut self, desk: u8) {
+        self.detail_want = Some(desk);
     }
 
     /// A new alert went up since the last call and `desktop_chime` is on:
@@ -352,6 +369,8 @@ impl Engine {
         self.sent_n = None;
         self.sent_lt = None;
         self.sent_tm = None;
+        self.sent_tx = None;
+        self.detail_want = None;
         self.sent_tv = None;
         self.sent_lv = None;
         self.sent_aa = None;
@@ -674,8 +693,10 @@ impl Engine {
             && now - self.sent_lt_at >= ACTIVITY_MIN_INTERVAL;
         let tv = if self.settings.team_view { self.settings.team_skin.code() } else { 0 };
         let tm_changed = tv != 0
-            && self.sent_tm.as_deref() != Some(self.team.as_str())
+            && (self.sent_tm.as_deref() != Some(self.team.as_str())
+                || self.sent_tx.as_deref() != Some(self.team_extra.as_str()))
             && now - self.sent_tm_at >= TEAM_MIN_INTERVAL;
+        let td_wanted = tv != 0 && self.detail_want.is_some();
         // A changed device setting goes out right away, like an event.
         let aa = self.settings.attention_anim.seconds();
         let pm = u8::from(self.settings.pace_marker);
@@ -703,7 +724,7 @@ impl Engine {
                 WriteKind::Poll
             } else if self.attention.pending() {
                 WriteKind::Attention
-            } else if (new_event || a_changed || n_changed || lt_changed || tm_changed || prefs_changed)
+            } else if (new_event || a_changed || n_changed || lt_changed || tm_changed || td_wanted || prefs_changed)
                 && !self.stale(now)
             {
                 // Any ok payload refreshes the device's DATA_FRESH_MS, so
@@ -732,6 +753,14 @@ impl Engine {
             p.tv = Some(tv);
             if tv != 0 {
                 p.tm = Some(self.team.clone());
+                p.tx = Some(self.team_extra.clone());
+                // A desk that left meanwhile: its id alone closes the card.
+                p.td = self.detail_want.map(|id| {
+                    self.desks
+                        .iter()
+                        .find(|d| d.id == id)
+                        .map_or_else(|| format!("{id:02x}"), crate::team::encode_detail)
+                });
             }
             [p.k1, p.k2, p.k3] = k.map(Some);
             p.th = Some(th);
@@ -800,9 +829,13 @@ impl Engine {
         if let Some(tv) = w.payload.tv {
             self.sent_tv = Some(tv);
         }
-        if w.payload.tm.is_some() && self.sent_tm != w.payload.tm {
+        if w.payload.tm.is_some() && (self.sent_tm != w.payload.tm || self.sent_tx != w.payload.tx) {
             self.sent_tm.clone_from(&w.payload.tm);
+            self.sent_tx.clone_from(&w.payload.tx);
             self.sent_tm_at = now;
+        }
+        if w.payload.td.is_some() {
+            self.detail_want = None;
         }
         if let (Some(k1), Some(k2), Some(k3)) = (w.payload.k1, w.payload.k2, w.payload.k3) {
             self.sent_k = Some([k1, k2, k3]);
@@ -1565,11 +1598,33 @@ mod tests {
         assert_eq!((w.payload.k2, w.payload.k3), (Some(4), Some(0x11310)), "resent on a reconnect");
     }
 
+    fn team(tm: &str) -> crate::team::Team {
+        crate::team::Team { tm: tm.into(), ..Default::default() }
+    }
+
+    #[test]
+    fn a_desks_detail_card_goes_out_when_the_device_asks() {
+        let mut e = Engine::new(settings("team_view = on\n"));
+        e.on_poll_results(T0, vec![(PathBuf::from("/h/.claude"), Ok(reading(15)))]);
+        let desk = crate::team::Desk { id: 0xa3, name: "api".into(), ..Default::default() };
+        e.set_team(crate::team::Team { tm: "a3i00api".into(), tx: "i---".into(), desks: vec![desk] });
+        let w = write(&mut e, T0).unwrap();
+        assert_eq!((w.payload.tx.as_deref(), w.payload.td.as_deref()), (Some("i---"), None));
+        assert!(write(&mut e, T0 + 1).is_none());
+        e.on_device_detail(0xa3);
+        let w = write(&mut e, T0 + 1).expect("asked for: sent at once");
+        assert!(w.payload.td.as_deref().is_some_and(|t| t.starts_with("a3|")), "{:?}", w.payload.td);
+        assert!(write(&mut e, T0 + 2).is_none(), "once");
+        // A desk that left: its id alone, which closes the card.
+        e.on_device_detail(0x07);
+        assert_eq!(write(&mut e, T0 + 3).unwrap().payload.td.as_deref(), Some("07"));
+    }
+
     #[test]
     fn team_view_is_sent_only_while_on_and_when_it_changes() {
         let mut e = Engine::new(settings(""));
         e.on_poll_results(T0, vec![(PathBuf::from("/h/.claude"), Ok(reading(15)))]);
-        e.set_team("a3w00api".into());
+        e.set_team(team("a3w00api"));
         let w = write(&mut e, T0).unwrap();
         assert_eq!((w.payload.tv, w.payload.tm.clone()), (Some(0), None), "off: no desks");
         assert!(write(&mut e, T0 + 1).is_none(), "a team change is not news while off");
@@ -1577,11 +1632,11 @@ mod tests {
         let w = write(&mut e, T0 + 2).expect("the switch goes out right away");
         assert_eq!((w.payload.tv, w.payload.tm.as_deref()), (Some(1), Some("a3w00api")));
         assert!(write(&mut e, T0 + 3).is_none(), "nothing new");
-        e.set_team("a3t10api".into());
+        e.set_team(team("a3t10api"));
         assert!(write(&mut e, T0 + 3).is_none(), "not more often than TEAM_MIN_INTERVAL");
         let w = write(&mut e, T0 + 2 + TEAM_MIN_INTERVAL).expect("a changed team is sent");
         assert_eq!((w.kind, w.payload.tm.as_deref()), (WriteKind::Event, Some("a3t10api")));
-        e.set_team(String::new());
+        e.set_team(team(""));
         let w = write(&mut e, T0 + 20).expect("the office emptying is sent too");
         assert_eq!((w.payload.tv, w.payload.tm.as_deref()), (Some(1), Some("")));
         e.update_settings(settings("team_view = on\nteam_skin = cubicles\n"));

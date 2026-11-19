@@ -40,6 +40,8 @@ pub mod platform;
 pub mod probe;
 pub mod rate;
 pub mod selector;
+pub mod sessions;
+pub mod statusline;
 pub mod team;
 pub mod themes;
 pub mod usage;

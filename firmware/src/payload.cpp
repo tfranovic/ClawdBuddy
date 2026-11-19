@@ -124,6 +124,9 @@ bool payload_parse(const char* json, UsageData* out, const char** err) {
     d.team_skin = (tv.isNull() || tv_n == 0) ? -1 : (int8_t)(tv_n == 2 ? 1 : 0);
     d.has_team = !doc["tm"].isNull();
     copy_str(d.team, sizeof(d.team), doc["tm"] | "");
+    copy_str(d.team_extra, sizeof(d.team_extra), doc["tx"] | "");
+    d.has_detail = !doc["td"].isNull();
+    copy_str(d.detail, sizeof(d.detail), doc["td"] | "");
     JsonVariant pm = doc["pm"];
     d.pace_marker = pm.isNull() ? -1 : (int8_t)((pm | 0) ? 1 : 0);
     d.btn_primary   = button_field(doc["k1"]);

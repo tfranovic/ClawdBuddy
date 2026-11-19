@@ -17,6 +17,10 @@ unicode-normalization.workspace = true
 ureq.workspace = true
 sha2.workspace = true
 
+# Whether a Claude Code session's process still exists (`sessions`).
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 # The OS's light/dark mode for the System theme (`platform::AppearanceWatch`).
 [target.'cfg(target_os = "linux")'.dependencies]
 dbus = "0.9"

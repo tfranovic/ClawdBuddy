@@ -395,6 +395,9 @@ pub enum DeviceEvent {
     /// TX `{"dismiss":true}`: the alert ended on the device (a tap, or its
     /// own timeout).
     Dismissed,
+    /// TX `{"desk":"a3"}`: a desk in the team view was tapped, and the
+    /// device wants its detail card (the `tm` id, two hex digits).
+    Detail(u8),
 }
 
 /// The device's events, in order.
@@ -410,7 +413,11 @@ pub fn device_event(uuid: Uuid, value: &[u8]) -> Option<DeviceEvent> {
         return None;
     }
     let text: String = std::str::from_utf8(value).ok()?.chars().filter(|c| !c.is_whitespace()).collect();
-    text.contains("\"dismiss\":true").then_some(DeviceEvent::Dismissed)
+    if text.contains("\"dismiss\":true") {
+        return Some(DeviceEvent::Dismissed);
+    }
+    let id = text.split_once("\"desk\":\"")?.1.get(..2)?;
+    u8::from_str_radix(id, 16).ok().map(DeviceEvent::Detail)
 }
 
 /// An open GATT link.
@@ -866,6 +873,8 @@ mod tests {
         assert_eq!(device_event(TX_UUID, br#"{"err":true}"#), None);
         assert_eq!(device_event(TX_UUID, &[0xff, 0xfe]), None);
         assert_eq!(device_event(RX_UUID, br#"{"dismiss":true}"#), None);
+        assert_eq!(device_event(TX_UUID, br#"{"desk":"a3"}"#), Some(DeviceEvent::Detail(0xa3)));
+        assert_eq!(device_event(TX_UUID, br#"{"desk":"zz"}"#), None);
         // The firmware's reply, as written.
         let src = std::fs::read_to_string(
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../firmware/src/ble.cpp"),

@@ -126,6 +126,17 @@ pub struct Payload {
     /// is on. Dropped after `lt` when a write would not fit.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tm: Option<String>,
+    /// More about each desk in `tm`, four characters each
+    /// ([`crate::team::encode_extra`]): the finer state, the context used,
+    /// the permission mode, the model. Sent with `tm`; older firmware
+    /// ignores it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tx: Option<String>,
+    /// One desk's detail card ([`crate::team::encode_detail`]), sent when
+    /// the device asks for it (a tap on the desk). A write that carries it
+    /// leaves `tm` out when both would not fit.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub td: Option<String>,
     /// What the primary button does ([`crate::buttons::ButtonAction::code`]).
     /// The device keeps the last value it got.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -151,7 +162,7 @@ pub struct Payload {
 /// Every key [`Payload`] can emit, in serialization order.
 pub const PAYLOAD_KEYS: &[&str] = &[
     "s", "sr", "w", "wr", "wf", "st", "acct", "pv", "rc", "rx", "tp", "pd", "rd", "t", "tf", "c", "ok", "b", "m", "x",
-    "a", "e", "es", "n", "lt", "rp", "lv", "aa", "pm", "tv", "tm", "k1", "k2", "k3", "th", "fc",
+    "a", "e", "es", "n", "lt", "rp", "lv", "aa", "pm", "tv", "tm", "tx", "td", "k1", "k2", "k3", "th", "fc",
 ];
 
 /// The fast-clock keys added in v0.4 (old firmware ignores them).
@@ -373,8 +384,15 @@ impl Payload {
             p.lt = None;
             data = p.to_json().into_bytes();
         }
+        // The desks go together; a detail card the device asked for goes
+        // before them (it keeps the desks it has).
         if data.len() > limit && p.tm.is_some() {
             p.tm = None;
+            p.tx = None;
+            data = p.to_json().into_bytes();
+        }
+        if data.len() > limit && p.td.is_some() {
+            p.td = None;
             data = p.to_json().into_bytes();
         }
         let mut msg = p.m.clone().unwrap_or_default();
@@ -694,6 +712,8 @@ mod tests {
             pm: Some(1),
             tv: Some(2),
             tm: None,
+            tx: None,
+            td: None,
             k1: Some(chord),
             k2: Some(chord),
             k3: Some(chord),
@@ -739,6 +759,8 @@ mod tests {
             pm: Some(1),
             tv: Some(1),
             tm: Some("a3w20api".into()),
+            tx: Some("w3-f".into()),
+            td: Some("a3|api|Working 5s".into()),
             k1: Some(1),
             k2: Some(2),
             k3: Some(6),

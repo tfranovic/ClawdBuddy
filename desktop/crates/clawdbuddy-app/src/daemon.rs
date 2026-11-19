@@ -1,0 +1,579 @@
+//! The daemon runtime: drives [`clawdbuddy_core::Engine`] with real I/O
+//! (the `claude` CLI, events.log, attention files, the BLE link).
+//!
+//! It runs on its own thread with a current-thread tokio runtime, so the GUI
+//! event loop never shares a reactor with it. The UI talks to it through a
+//! [`DaemonHandle`]: commands in, a [`Status`] snapshot out.
+
+use std::path::PathBuf;
+use std::time::{Duration, SystemTime};
+
+use clawdbuddy_ble::{
+    should_wake, AddressCache, Bluetooth, DeviceEvent, DeviceEvents, DeviceLink, LinkError, LinkOptions, Reconnect,
+    Sighting, MAX_WRITE,
+};
+use clawdbuddy_core::attention::AttentionInbox;
+use clawdbuddy_core::backoff;
+use clawdbuddy_core::codex::{self, CodexCache};
+use clawdbuddy_core::engine::PollPlan;
+use clawdbuddy_core::events::EventTail;
+use clawdbuddy_core::platform::AppearanceWatch;
+use clawdbuddy_core::probe;
+use clawdbuddy_core::usage;
+use clawdbuddy_core::{unix_now, Engine, EngineStatus, HostClock, Paths, Settings, WriteKind};
+use tokio::sync::{mpsc, watch};
+use tokio::task::JoinHandle;
+
+/// Loop tick: events reach the device within about this long.
+const TICK: Duration = Duration::from_millis(500);
+/// Config re-read interval (s).
+const SETTINGS_EVERY: i64 = 5;
+/// Connection check interval (s).
+const LINK_CHECK_EVERY: i64 = 5;
+
+/// Requests from the UI.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Command {
+    /// Poll `/usage` now.
+    RefreshNow,
+    /// Drop the link and look for the device again (e.g. after pairing).
+    Reconnect,
+    /// Forget the cached device address, then look again (after swapping boards).
+    Forget,
+    /// Re-read the config now (the window saved it), not at the next
+    /// periodic re-read.
+    ReloadSettings,
+    /// Stop the daemon thread.
+    Shutdown,
+}
+
+/// The BLE side, for the tray's status dot.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum LinkState {
+    /// Not tried yet.
+    #[default]
+    Starting,
+    /// No adapter, or Bluetooth is off.
+    NoAdapter(String),
+    /// No paired device found; retrying.
+    Searching,
+    /// Connecting to a known device.
+    Connecting,
+    /// Connected.
+    Connected {
+        /// Cache key (address).
+        key: String,
+        /// Device name.
+        name: Option<String>,
+    },
+}
+
+/// Everything the tray needs, updated every tick.
+#[derive(Debug, Clone, Default)]
+pub struct Status {
+    /// BLE link.
+    pub link: LinkState,
+    /// Usage / hooks / attention.
+    pub engine: EngineStatus,
+    /// Unix seconds of the last successful device write.
+    pub last_write_at: Option<i64>,
+    /// `claude` CLI path in use (None = not found).
+    pub claude: Option<PathBuf>,
+}
+
+/// Handle held by the UI.
+#[derive(Debug)]
+pub struct DaemonHandle {
+    /// Send commands.
+    pub commands: mpsc::UnboundedSender<Command>,
+    /// Watch status.
+    pub status: watch::Receiver<Status>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl DaemonHandle {
+    /// Ask the daemon to stop and wait for it.
+    pub fn shutdown(mut self) {
+        let _ = self.commands.send(Command::Shutdown);
+        if let Some(t) = self.thread.take() {
+            let _ = t.join();
+        }
+    }
+}
+
+/// Start the daemon on a background thread.
+pub fn spawn(paths: Paths) -> DaemonHandle {
+    let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
+    let (st_tx, st_rx) = watch::channel(Status::default());
+    let thread = std::thread::Builder::new()
+        .name("clawdbuddy-daemon".into())
+        .spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().expect("tokio runtime");
+            rt.block_on(run(paths, cmd_rx, st_tx));
+        })
+        .expect("spawn daemon thread");
+    DaemonHandle { commands: cmd_tx, status: st_rx, thread: Some(thread) }
+}
+
+/// Re-read the config into the engine, finding `claude` again when its path
+/// changed (or it wasn't found). An unreadable file keeps the settings in
+/// use.
+fn reload_settings(paths: &Paths, engine: &mut Engine, claude: &mut Option<PathBuf>) {
+    let Ok(s) = Settings::load(paths) else { return };
+    if s.claude_path != engine.settings().claude_path || claude.is_none() {
+        *claude = usage::find_claude(s.claude_path.as_deref(), &paths.home);
+    }
+    engine.update_settings(s);
+    engine.set_claude_found(claude.is_some());
+}
+
+type PollResults = Vec<(PathBuf, probe::Polled)>;
+/// A Codex poll's results, and the reset-credit cache it carried.
+type CodexResults = (PollResults, CodexCache);
+type ConnectResult = Result<(DeviceLink, DeviceEvents), LinkError>;
+
+/// Read each account of a poll plan: the probe, `/usage`, or a reading known
+/// without a call. The probe runs from `cwd` (the state dir).
+fn poll_all(claude: Option<PathBuf>, plan: PollPlan, home: PathBuf, cwd: PathBuf) -> PollResults {
+    let now = chrono::Utc::now();
+    plan.accounts
+        .into_iter()
+        .zip(plan.plans)
+        .map(|(d, p)| {
+            let r = probe::poll(claude.as_deref(), &d, &home, &cwd, &p, now);
+            (d, r)
+        })
+        .collect()
+}
+
+/// Read each Codex account due (blocking; the endpoint is slow).
+fn poll_codex(dirs: Vec<PathBuf>, mut cache: CodexCache) -> CodexResults {
+    let now = chrono::Utc::now();
+    let results = dirs.into_iter().map(|d| (d.clone(), codex::poll(&d, now, &mut cache))).collect();
+    (results, cache)
+}
+
+/// The daemon loop. Returns on [`Command::Shutdown`] or when every command
+/// sender is dropped.
+pub async fn run(paths: Paths, mut commands: mpsc::UnboundedReceiver<Command>, status: watch::Sender<Status>) {
+    let settings = Settings::load(&paths).unwrap_or_else(|e| {
+        log::warn!("config unreadable ({e}); using defaults");
+        Settings::from_config(&Default::default(), &paths, None)
+    });
+    log::info!(
+        "accounts: {}",
+        settings.config_dirs.iter().map(|d| d.display().to_string()).collect::<Vec<_>>().join(", ")
+    );
+    if !settings.codex_dirs.is_empty() {
+        log::info!(
+            "Codex accounts (trial): {}",
+            settings.codex_dirs.iter().map(|d| d.display().to_string()).collect::<Vec<_>>().join(", ")
+        );
+    }
+    let mut engine = Engine::new(settings);
+    // Blocks the usage endpoint set survive restarts (a call during one
+    // lengthens it).
+    engine.restore_blocks(&backoff::load_blocks(&paths.usage_blocks_file()), unix_now());
+    let mut saved_blocks = engine.blocks(unix_now());
+    let host = HostClock { utc_offset_secs: 0, prefers_12h: clawdbuddy_core::platform::prefers_12h() };
+    // System's Dark or Light (and Solarized's) follows the OS.
+    // The engine has Dark until the first answer (no write goes out before a
+    // link and a poll anyway).
+    let appearance = AppearanceWatch::spawn();
+    let mut shown_appearance = None;
+    let inbox = AttentionInbox::new(&paths.state_dir);
+    let mut team = clawdbuddy_core::team::TeamTracker::new(&paths.state_dir);
+    let (mut tail, seed) = EventTail::open(paths.events_log());
+    engine.seed_events(&seed);
+    engine.set_hooks_installed(tail.exists());
+    let cache = AddressCache::new(paths.ble_address_file());
+    let link_opts = LinkOptions::default();
+
+    let mut claude = usage::find_claude(engine.settings().claude_path.as_deref(), &paths.home);
+    match &claude {
+        Some(c) => log::info!("claude CLI: {}", c.display()),
+        None => log::warn!(
+            "claude CLI not found (set claude_path in {}); usage comes from the usage endpoint every 12 min",
+            paths.config_file.display()
+        ),
+    }
+    engine.set_claude_found(claude.is_some());
+
+    let mut link: Option<DeviceLink> = None;
+    let mut device_events: Option<DeviceEvents> = None;
+    let mut connecting: Option<JoinHandle<ConnectResult>> = None;
+    let mut polling: Option<JoinHandle<PollResults>> = None;
+    // Codex accounts poll on their own task, so a slow endpoint never holds
+    // up a Claude account. The credits cache travels with it.
+    let mut codex_polling: Option<JoinHandle<CodexResults>> = None;
+    let mut credits = Some(CodexCache::default());
+    let mut link_state = LinkState::Starting;
+    let mut reconnect = Reconnect::default();
+    let bt = Bluetooth::default();
+    let mut wakeups = clawdbuddy_ble::spawn_watcher(bt.clone());
+    let mut last_settings = unix_now();
+    let mut last_link_check = unix_now();
+    let mut last_write_at = None;
+    let mut ticker = tokio::time::interval(TICK);
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+    loop {
+        ticker.tick().await;
+        let now = unix_now();
+
+        // ---- commands ----
+        loop {
+            match commands.try_recv() {
+                Ok(Command::RefreshNow) => engine.request_refresh(now),
+                Ok(cmd @ (Command::Reconnect | Command::Forget)) => {
+                    if let Some(l) = link.take() {
+                        l.close().await;
+                    }
+                    if cmd == Command::Forget {
+                        if let Some(key) = cache.load() {
+                            cache.invalidate(&key);
+                        }
+                    }
+                    device_events = None;
+                    link_state = LinkState::Searching;
+                    reconnect.retry_in(now, 0);
+                }
+                Ok(Command::ReloadSettings) => {
+                    // This tick's write check sees the new settings.
+                    last_settings = now;
+                    reload_settings(&paths, &mut engine, &mut claude);
+                }
+                Ok(Command::Shutdown) | Err(mpsc::error::TryRecvError::Disconnected) => {
+                    if let Some(l) = link.take() {
+                        l.close().await;
+                    }
+                    log::info!("daemon stopped");
+                    return;
+                }
+                Err(mpsc::error::TryRecvError::Empty) => break,
+            }
+        }
+
+        // ---- config (re-read every SETTINGS_EVERY, and on ReloadSettings:
+        // this catches hand edits and a `--daemon` with no tray) ----
+        if now - last_settings >= SETTINGS_EVERY {
+            last_settings = now;
+            reload_settings(&paths, &mut engine, &mut claude);
+        }
+
+        // ---- fast clock ----
+        if let Some(a) = appearance.known().filter(|a| shown_appearance != Some(*a)) {
+            log::info!("system appearance: {a:?}");
+            shown_appearance = Some(a);
+            engine.set_appearance(a);
+        }
+        for ev in tail.poll() {
+            log::debug!("hook {:?} {}", ev.kind, ev.session);
+            engine.on_hook_event(&ev, now);
+        }
+        engine.set_hooks_installed(tail.exists());
+        engine.set_last_tool(clawdbuddy_core::attention::read_last_tool(&paths.state_dir));
+        engine.set_team(team.poll(now));
+        let alert = inbox.take_alert(SystemTime::now());
+        let clears = inbox.take_clears();
+        if alert.is_some() || !clears.is_empty() {
+            engine.on_attention(alert, &clears);
+        }
+        if engine.take_desktop_chime() {
+            crate::chime::play();
+        }
+        if engine.expire_attention(SystemTime::now()) {
+            log::info!("attention alert expired");
+        }
+
+        // ---- slow clock ----
+        if let Some(rx) = device_events.as_mut() {
+            while let Ok(ev) = rx.try_recv() {
+                match ev {
+                    DeviceEvent::Refresh => {
+                        log::info!("refresh requested by device");
+                        engine.request_refresh(now);
+                    }
+                    DeviceEvent::Dismissed => {
+                        log::info!("attention alert dismissed on the device");
+                        engine.on_device_dismissed();
+                    }
+                }
+            }
+        }
+        if polling.as_ref().is_some_and(JoinHandle::is_finished) {
+            if let Ok(results) = polling.take().expect("checked").await {
+                for (d, r) in &results {
+                    if let Err(e) = &r.result {
+                        log::warn!("{}: {e}", d.display());
+                    }
+                }
+                engine.on_poll_results(unix_now(), results);
+                let blocks = engine.blocks(unix_now());
+                if blocks != saved_blocks {
+                    if let Err(e) = backoff::save_blocks(&paths.usage_blocks_file(), &blocks) {
+                        log::warn!("couldn't save usage blocks: {e}");
+                    }
+                    saved_blocks = blocks;
+                }
+            }
+        }
+        if polling.is_none() {
+            if let Some(plan) = engine.begin_poll(now) {
+                log::debug!(
+                    "polling ({:?}): {:?}",
+                    plan.reason,
+                    plan.accounts.iter().zip(&plan.plans).collect::<Vec<_>>()
+                );
+                let (c, home, cwd) = (claude.clone(), paths.home.clone(), paths.state_dir.clone());
+                polling = Some(tokio::task::spawn_blocking(move || poll_all(c, plan, home, cwd)));
+            }
+        }
+        if codex_polling.as_ref().is_some_and(JoinHandle::is_finished) {
+            match codex_polling.take().expect("checked").await {
+                Ok((results, cache)) => {
+                    credits = Some(cache);
+                    for (d, r) in &results {
+                        if let Err(e) = &r.result {
+                            log::warn!("{}: {e}", d.display());
+                        } else if let Some(e) = &r.idle_miss {
+                            log::warn!("{}: {e}; using the Codex session log", d.display());
+                        }
+                    }
+                    engine.on_codex_results(unix_now(), results);
+                    let blocks = engine.blocks(unix_now());
+                    if blocks != saved_blocks {
+                        if let Err(e) = backoff::save_blocks(&paths.usage_blocks_file(), &blocks) {
+                            log::warn!("couldn't save usage blocks: {e}");
+                        }
+                        saved_blocks = blocks;
+                    }
+                }
+                Err(e) => {
+                    log::error!("Codex poll task failed: {e}");
+                    credits = Some(CodexCache::default());
+                }
+            }
+        }
+        if codex_polling.is_none() {
+            if let Some(dirs) = engine.begin_codex_poll(now) {
+                log::debug!("polling Codex: {dirs:?}");
+                let cache = credits.take().unwrap_or_default();
+                codex_polling = Some(tokio::task::spawn_blocking(move || poll_codex(dirs, cache)));
+            }
+        }
+
+        // ---- link ----
+        if connecting.as_ref().is_some_and(JoinHandle::is_finished) {
+            match connecting.take().expect("checked").await {
+                Ok(Ok((l, rx))) => {
+                    log::info!("connected to {} ({})", l.name().unwrap_or("device"), l.key());
+                    link_state = LinkState::Connected { key: l.key().to_owned(), name: l.name().map(str::to_owned) };
+                    link = Some(l);
+                    device_events = Some(rx);
+                    reconnect.connected();
+                    inbox.reset();
+                    engine.on_connected();
+                }
+                Ok(Err(e)) => {
+                    link_state = match &e {
+                        LinkError::NoAdapter(s) => LinkState::NoAdapter(s.clone()),
+                        _ => LinkState::Searching,
+                    };
+                    let wait = reconnect.failed(now, e.reached_device());
+                    if !matches!(e, LinkError::NotFound) || wait == 1 {
+                        log::info!("{e}; retrying in {wait}s");
+                    }
+                }
+                Err(e) => log::error!("connect task failed: {e}"),
+            }
+        }
+        // The OS saw the device come back (BlueZ reconnected the bonded
+        // device, or a scan saw it advertise): don't sit out the wait.
+        while let Ok(w) = wakeups.try_recv() {
+            if link.is_some() || !should_wake(&w, cache.load().as_deref()) {
+                continue;
+            }
+            if reconnect.wake(now, connecting.is_some(), w.sighting) {
+                let how = match w.sighting {
+                    Sighting::Connected => "connected at the OS level",
+                    Sighting::Advertising => "advertising",
+                };
+                log::info!("device {} {how}; reconnecting now", w.key);
+            }
+        }
+        if link.is_none() && connecting.is_none() && reconnect.due(now) {
+            if link_state == LinkState::Starting {
+                link_state = LinkState::Connecting;
+            }
+            let (bt, cache, opts) = (bt.clone(), cache.clone(), link_opts.clone());
+            connecting = Some(tokio::spawn(async move { DeviceLink::open(&bt, &cache, &opts).await }));
+        }
+        if let Some(l) = &link {
+            if now - last_link_check >= LINK_CHECK_EVERY {
+                last_link_check = now;
+                if !l.is_connected().await {
+                    log::info!("device disconnected, reconnecting...");
+                    drop_link(&mut link).await;
+                    device_events = None;
+                    link_state = LinkState::Searching;
+                    reconnect.retry_in(now, 2);
+                }
+            }
+        }
+
+        // ---- write ----
+        if let Some(l) = &link {
+            if let Some(w) = engine
+                .next_write(now, HostClock { utc_offset_secs: clawdbuddy_core::platform::utc_offset_secs(), ..host })
+            {
+                let bytes = w.payload.encode(MAX_WRITE);
+                let label = match w.kind {
+                    WriteKind::Poll => "Sending",
+                    WriteKind::Heartbeat => "Heartbeat",
+                    WriteKind::Attention => "Attention",
+                    WriteKind::Event => "Event",
+                    WriteKind::NoData => "No data",
+                };
+                log::info!("{label}: {}", String::from_utf8_lossy(&bytes));
+                match l.write(&bytes).await {
+                    Ok(()) => {
+                        engine.mark_written(now, &w);
+                        last_write_at = Some(now);
+                    }
+                    Err(e) => {
+                        log::warn!("write failed: {e}");
+                        if !l.is_connected().await {
+                            drop_link(&mut link).await;
+                            device_events = None;
+                            link_state = LinkState::Searching;
+                            reconnect.retry_in(now, 2);
+                        }
+                    }
+                }
+            }
+        }
+
+        let _ = status.send(Status {
+            link: link_state.clone(),
+            engine: engine.status(now),
+            last_write_at,
+            claude: claude.clone(),
+        });
+    }
+}
+
+/// Drop a link that stopped working. BlueZ still reports a zombie
+/// connected, so it is disconnected first (bounded at 5 s), or the next
+/// attempt would find it connected and reuse it.
+async fn drop_link(link: &mut Option<DeviceLink>) {
+    if let Some(l) = link.take().filter(DeviceLink::is_zombie) {
+        l.close().await;
+    }
+}
+
+/// One poll of every account, printed as the payload the device would get
+/// (`clawdbuddy --once`). No BLE.
+pub fn once(paths: &Paths) -> i32 {
+    let settings = match Settings::load(paths) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("config: {e}");
+            return 1;
+        }
+    };
+    let claude = usage::find_claude(settings.claude_path.as_deref(), &paths.home);
+    let now = unix_now();
+    let mut engine = Engine::new(settings.clone());
+    engine.set_appearance(clawdbuddy_core::platform::system_appearance().unwrap_or_default());
+    engine.restore_blocks(&backoff::load_blocks(&paths.usage_blocks_file()), now);
+    // A blocked account isn't asked: a call during a block lengthens it.
+    let blocked = engine.blocks(now);
+    for (d, b) in &blocked {
+        let provider = if settings.codex_dirs.contains(d) { usage::Provider::Codex } else { usage::Provider::Claude };
+        let paused = usage::paused_message_by(provider, b.until, clawdbuddy_core::platform::utc_offset_secs());
+        println!("{}: {paused}", d.display());
+    }
+    // Nothing is known yet, so the idle source for every account (no message).
+    let accounts: Vec<PathBuf> = settings.config_dirs.iter().filter(|d| !blocked.contains_key(*d)).cloned().collect();
+    let plan = PollPlan {
+        reason: clawdbuddy_core::cadence::PollReason::Startup,
+        plans: vec![probe::Plan::Usage; accounts.len()],
+        accounts,
+    };
+    let results = poll_all(claude, plan, paths.home.clone(), paths.state_dir.clone());
+    let codex_dirs: Vec<PathBuf> = settings.codex_dirs.iter().filter(|d| !blocked.contains_key(*d)).cloned().collect();
+    let (codex_results, _) = poll_codex(codex_dirs, CodexCache::default());
+    let mut ok = false;
+    for (d, r) in &results {
+        match &r.result {
+            Ok(r) if r.is_spend_only() => {
+                ok = true;
+                println!("{}: spend limit {}% used", d.display(), r.session_pct());
+            }
+            Ok(r) if r.no_session_limit() => {
+                ok = true;
+                println!("{}: no 5-hour limit, week {}%", d.display(), r.session_pct());
+            }
+            Ok(r) => {
+                ok = true;
+                println!(
+                    "{}: session {}%{}, week {}%",
+                    d.display(),
+                    r.session_pct(),
+                    if r.window_started() { "" } else { " (window not started)" },
+                    r.week.as_ref().map_or(0, |w| w.pct)
+                );
+            }
+            Err(e) => println!("{}: {e}", d.display()),
+        }
+    }
+    for (d, polled) in &codex_results {
+        match &polled.result {
+            Ok(r) => {
+                ok = true;
+                let resets = r.resets.as_ref().map_or_else(
+                    || "reset credits unknown".to_owned(),
+                    |c| {
+                        let mut s = format!("{} reset credit(s) held", c.held);
+                        if let Some(t) = c.next_expiry() {
+                            s += &format!(", next expires {}", t.format("%Y-%m-%d %H:%M UTC"));
+                        }
+                        s
+                    },
+                );
+                let windows = match &r.session {
+                    Some(w) => format!("5-hour {}%, week {}%", w.pct, r.week.as_ref().map_or(0, |w| w.pct)),
+                    None => format!("no 5-hour limit, week {}%", r.session_pct()),
+                };
+                let source = match &polled.idle_miss {
+                    Some(e) => format!(" (from the session log: {e})"),
+                    None => String::new(),
+                };
+                println!("{} (Codex): {windows}, {resets}{source}", d.display());
+                println!(
+                    "  Codex payload: {}",
+                    clawdbuddy_core::Payload::from_reading(r, chrono::Utc::now()).to_json()
+                );
+            }
+            Err(e) => println!("{} (Codex): {e}", d.display()),
+        }
+    }
+    engine.on_poll_results(now, results);
+    engine.on_codex_results(now, codex_results);
+    if let Err(e) = backoff::save_blocks(&paths.usage_blocks_file(), &engine.blocks(unix_now())) {
+        eprintln!("couldn't save usage blocks: {e}");
+    }
+    let host = HostClock {
+        utc_offset_secs: clawdbuddy_core::platform::utc_offset_secs(),
+        prefers_12h: clawdbuddy_core::platform::prefers_12h(),
+    };
+    if let Some(w) = engine.next_write(now, host) {
+        println!("{}", String::from_utf8_lossy(&w.payload.encode(MAX_WRITE)));
+    }
+    if ok {
+        0
+    } else {
+        1
+    }
+}

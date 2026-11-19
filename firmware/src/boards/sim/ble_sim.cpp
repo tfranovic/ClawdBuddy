@@ -89,7 +89,7 @@ static void load_scenario(void) {
 
 static void refresh_title(void) {
     char t[96];
-    snprintf(t, sizeof(t), "Clawdmeter sim — %s[%d/%d] %s %s",
+    snprintf(t, sizeof(t), "ClawdBuddy sim — %s[%d/%d] %s %s",
              connected ? "" : "(disconnected) ",
              cur + 1, n_states, states[cur].name,
              playing ? "\xE2\x96\xB6" : "\xE2\x8F\xB8");
@@ -123,7 +123,7 @@ void ble_tick(void) {
 ble_state_t ble_get_state(void) {
     return connected ? BLE_STATE_CONNECTED : BLE_STATE_DISCONNECTED;
 }
-const char* ble_get_device_name(void) { return "Clawdmeter (sim)"; }
+const char* ble_get_device_name(void) { return "ClawdBuddy (sim)"; }
 const char* ble_get_mac_address(void) { return "00:51:4D:00:00:01"; }
 
 void ble_clear_bonds(void) { printf("[sim] pair gesture completed — bonds cleared\n"); }

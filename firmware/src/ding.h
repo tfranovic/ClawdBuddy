@@ -1,11 +1,11 @@
 #pragma once
 #include <stdint.h>
 
-// The one sound Clawdmeter makes (attention alert and session-reset chime):
+// The one sound ClawdBuddy makes (attention alert and session-reset chime):
 // a ding at C#5. A sine strike with three faint partials, a 0.7 ms attack,
 // a two-stage decay (a fast 9 ms fall into a slow 0.24 s ring) and a short
 // high-passed noise click at the start, synthesized here so no audio file
-// ships. The desktop app plays the same ding (clawdmeter-app/src/chime.rs);
+// ships. The desktop app plays the same ding (clawdbuddy-app/src/chime.rs);
 // keep the two in step.
 //
 // Pure math, no Arduino: native-tested in test/test_ding.

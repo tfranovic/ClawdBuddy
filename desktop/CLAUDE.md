@@ -1,7 +1,7 @@
 # Desktop app
 
 Rust workspace, edition 2021. MSRV 1.88 for the library crates, 1.90 for
-`clawdmeter-app`. Run everything from `desktop/`.
+`clawdbuddy-app`. Run everything from `desktop/`.
 
 ## Commands
 
@@ -9,8 +9,8 @@ Rust workspace, edition 2021. MSRV 1.88 for the library crates, 1.90 for
 cargo fmt --all --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --locked
-cargo clippy -p clawdmeter-app --target x86_64-pc-windows-gnu -- -D warnings   # Windows cfg check from Linux
-cargo run -p clawdmeter-app -- --once     # sanity: real usage (idle source) → payload, no BLE
+cargo clippy -p clawdbuddy-app --target x86_64-pc-windows-gnu -- -D warnings   # Windows cfg check from Linux
+cargo run -p clawdbuddy-app -- --once     # sanity: real usage (idle source) → payload, no BLE
 ```
 
 Linux build deps: `.github/actions/linux-desktop-deps/action.yml`.
@@ -22,7 +22,7 @@ is faked behind `FlashHardware`.
 
 ## Crates
 
-- `clawdmeter-core`: pure logic. `config` (the `key = value` file, edited in
+- `clawdbuddy-core`: pure logic. `config` (the `key = value` file, edited in
   place), `usage` (runs and parses `claude --output-format json -p /usage`: `Current session/week`
   lines, `Spend limit:` lines, the overage header, reset dates with an
   optional year; fixtures in `tests/fixtures/` are real or derived from the
@@ -33,7 +33,7 @@ is faked behind `FlashHardware`.
   machine: `next_write` / `mark_written`), `autostart` (systemd / XDG /
   LaunchAgent / Run key, legacy-daemon detection + `disable_legacy`),
   `launch`, `platform`.
-- `clawdmeter-ble`: btleplug link. The manager and adapter come from one
+- `clawdbuddy-ble`: btleplug link. The manager and adapter come from one
   `Bluetooth` handle per runtime (`bluetooth.rs`), kept for good: on Linux
   every btleplug `Manager` is a D-Bus connection that is never closed, on
   macOS every `adapters()` call a CoreBluetooth thread that never exits.
@@ -54,13 +54,13 @@ is faked behind `FlashHardware`.
   devices (custom service, or HID + exact name); address cache, REQ
   subscription, zombie-write breaker (a zombie link is disconnected before
   it's dropped), BlueZ trust, macOS stale-bond unpair via `blueutil`,
-  Windows bonded-address fallback (PnP / `CLAWDMETER_BLE_ADDRESS`).
-- `clawdmeter-flash`: downloads the release `manifest.json`, matches boards by
+  Windows bonded-address fallback (PnP / `CLAWDBUDDY_BLE_ADDRESS`).
+- `clawdbuddy-flash`: downloads the release `manifest.json`, matches boards by
   chip + flash size, writes with espflash.
-- `clawdmeter-app`: the `clawdmeter` binary. Tray (`tray/`, ksni on Linux;
+- `clawdbuddy-app`: the `clawdbuddy` binary. Tray (`tray/`, ksni on Linux;
   on macOS the whole menu is one AppKit panel, `tray/mac_menu.rs`, put into
   muda's NSMenu: the device's home screen, a reload button in its corner,
-  and a footer with Open Clawdmeter and icons for an update (`tray::
+  and a footer with Open ClawdBuddy and icons for an update (`tray::
   update_offer`: while the app is behind, its update, to the Update page,
   when the sidebar would announce it, else nothing; once the app is current,
   the board's firmware, to Flash; the Linux/Windows item does the same), the computer's chime (switches `desktop_chime` like
@@ -79,7 +79,7 @@ is faked behind `FlashHardware`.
   meter in the panel, the rows and the Overview),
   window (`ui/`), `daemon.rs` (drives the engine on its own thread: 0.5 s
   tick, config re-read every 5 s and on `Command::ReloadSettings`),
-  `hooks/` (`clawdmeter hook alert|clear|event` and the settings.json
+  `hooks/` (`clawdbuddy hook alert|clear|event` and the settings.json
   installer), `ipc.rs` (single-instance lock, status file, command queues,
   window lock), `onboarding.rs`, `boards.rs` (names, buy links,
   illustrations), `chime.rs`.
@@ -89,17 +89,17 @@ is faked behind `FlashHardware`.
 - Modes: no args = tray app (logs to `<state>/daemon.log`); `--daemon`
   headless; `--once` (poll + print payload, no BLE); `--window [PAGE]
   [--manifest PATH]`; `--ports`; `--info PORT`; `hook MODE [event]`.
-- Env: `CLAWDMETER_LOG`, `CLAWDMETER_NO_TRAY`, `POLL_INTERVAL`,
+- Env: `CLAWDBUDDY_LOG`, `CLAWDBUDDY_NO_TRAY`, `POLL_INTERVAL`,
   `CLAUDE_CONFIG_DIR` (default account), `CODEX_HOME` (the default Codex
-  account), `CLAWDMETER_BLE_ADDRESS`,
-  `CLAWDMETER_DECORATIONS`, `CLAWDMETER_BUTTON_LAYOUT`,
-  `CLAWDMETER_DEMO_FIRMWARE_UPDATE` (debug builds: pretend that firmware
+  account), `CLAWDBUDDY_BLE_ADDRESS`,
+  `CLAWDBUDDY_DECORATIONS`, `CLAWDBUDDY_BUTTON_LAYOUT`,
+  `CLAWDBUDDY_DEMO_FIRMWARE_UPDATE` (debug builds: pretend that firmware
   release is out and the board older, for the tray's update icon),
-  `CLAWDMETER_DEMO_USAGE=1` (debug builds: the tray shows made-up usage,
+  `CLAWDBUDDY_DEMO_USAGE=1` (debug builds: the tray shows made-up usage,
   the same on every OS; with the pace marker on, `--example tray_header`'s
   `compare` render matches it, for side-by-side screenshots).
-- State lives in one dir, `~/.config/clawdmeter/` (Windows:
-  `%LOCALAPPDATA%\Clawdmeter\`): `config`, `events.log`, `attention`,
+- State lives in one dir, `~/.config/clawdbuddy/` (Windows:
+  `%LOCALAPPDATA%\ClawdBuddy\`): `config`, `events.log`, `attention`,
   `clear-<sid>`, `ble-address`, `daemon.log`, `usage-blocks.json`, app
   state and locks.
 - Config keys: `config_dirs`, `codex_dirs` (Codex homes; absent = the
@@ -119,7 +119,7 @@ is faked behind `FlashHardware`.
   `previous-track`, `next-track`, `volume-down`, `volume-up`, `mute`) or a
   shortcut, modifiers and a key joined by `+` with an optional `hold`
   (`ctrl+shift+m`, `super+alt+k`, `ctrl+space hold`; `tap` marks one
-  that would read as a preset, `space tap`). `clawdmeter_core::buttons` has
+  that would read as a preset, `space tap`). `clawdbuddy_core::buttons` has
   the grammar, the key table and the keystroke→HID mapping; sent as
   `k1`/`k2`/`k3`. The Device page's Controls field draws a keycap per button
   the board has, in the order and under the names in `BoardInfo.buttons`
@@ -155,7 +155,7 @@ is faked behind `FlashHardware`.
   the daemon lets through: the hook records `k` from `hook_event_name` /
   `notification_type` and `engine.on_attention` drops the rest; default all
   but `idle`).
-- Launch paths (`clawdmeter-core::launch`): hooks and Start at login write a
+- Launch paths (`clawdbuddy-core::launch`): hooks and Start at login write a
   stable path (`$APPIMAGE`, the Nix profile link, else `current_exe`). Under
   an AppImage, hooks run a copy extracted to `<state>/appimage/` (renewed when
   the AppImage changes) so hook events don't FUSE-mount it; Start at login
@@ -173,11 +173,11 @@ Per account (`probe.rs`, `oauth.rs`):
   memory off, cwd = state dir. It reads the `rate_limit_event` headers.
 - **Idle source** otherwise, and on a probe miss unless backing off:
   `GET https://api.anthropic.com/api/oauth/usage` with the account's OAuth
-  token, read-only, User-Agent `clawdmeter/<version>`. Token lookup: on macOS
+  token, read-only, User-Agent `clawdbuddy/<version>`. Token lookup: on macOS
   the Keychain first (`Claude Code-credentials`, plus
   `-<sha256(config dir)[..8]>` for a non-default dir, as Claude Code names
   it), then `<config dir>/.credentials.json`; the first unexpired token wins.
-- **Clawdmeter never refreshes the token.** On an expired or rejected token,
+- **ClawdBuddy never refreshes the token.** On an expired or rejected token,
   or none readable, it falls back to `claude -p /usage` (Claude Code
   refreshes its own token, and that doesn't start a window), under the same
   backoff.
@@ -228,7 +228,7 @@ Per account (`probe.rs`, `oauth.rs`):
 
 ## Codex accounts (a trial)
 
-`clawdmeter-core::codex`. A Codex home (`$CODEX_HOME` or `~/.codex` with an
+`clawdbuddy-core::codex`. A Codex home (`$CODEX_HOME` or `~/.codex` with an
 `auth.json`, found by `Settings::load`; others added on the Accounts page,
 whose picker sorts a folder with `auth.json` into `codex_dirs`) is an account
 keyed by its path, beside the Claude config dirs. Without one nothing Codex
@@ -318,7 +318,7 @@ runs or shows (bar the Accounts page's trial note).
 
 - **One window, one process.** GPUI 0.2.2 ends its event loop when the last
   window closes on Linux/Windows, so the tray process never runs GPUI: the
-  window is a `clawdmeter --window [PAGE]` child process.
+  window is a `clawdbuddy --window [PAGE]` child process.
 - `ui/app.rs` is the root: a sidebar (Overview, Device, Flash, Accounts,
   Hooks, Settings) or the setup wizard (`ui/setup.rs`) filling the window.
   `Page::Update` has no sidebar item: the "Update available" pill
@@ -352,8 +352,8 @@ runs or shows (bar the Accounts page's trial note).
   update" and a link to the release page. The download takes this install's
   package to `~/Downloads` (`release::fetch_app_package`; the package only
   where installing it replaces the running copy, `AppPackage::for_install`:
-  `.dmg` from `/Applications/Clawdmeter.app`, `.msi` from its install
-  folder, `.deb` for a `/usr/bin/clawdmeter` that dpkg lists as its
+  `.dmg` from `/Applications/ClawdBuddy.app`, `.msi` from its install
+  folder, `.deb` for a `/usr/bin/clawdbuddy` that dpkg lists as its
   package's, AppImage under `$APPIMAGE`; on x86_64 Linux the button is a
   menu of the `.deb` and AppImage instead, `AppPackage::for_linux`, with the
   detected one marked "This install"), fetched in 2 MB range requests
@@ -366,7 +366,7 @@ runs or shows (bar the Accounts page's trial note).
   builds aren't notarized or signed, so the user approves each update (Open
   Anyway / Run anyway). A verified copy already in the folder is reused as
   it is. Other installs get a button to the release page. Builds without
-  `CLAWDMETER_VERSION` are never offered one, nor is a prerelease whose own
+  `CLAWDBUDDY_VERSION` are never offered one, nor is a prerelease whose own
   tag is published (the check stores that tag), and with `update_check` off
   nothing is announced. Off screen the page re-reads the status and config
   every 5 s, not every tick. The demo's `--app-update`
@@ -386,7 +386,7 @@ runs or shows (bar the Accounts page's trial note).
   decorations and `ui::chrome` draws an Adwaita-style header bar. gpui 0.2.2
   reports "server" even with no decoration manager, so
   `decorations::wanted()` probes the Wayland registry itself.
-  `CLAWDMETER_DECORATIONS=client|server` overrides. The bar's minimize,
+  `CLAWDBUDDY_DECORATIONS=client|server` overrides. The bar's minimize,
   maximize/restore and close buttons follow GNOME's `button-layout` (sides
   and order), live: `platform::SettingWatch` follows it on a background
   thread (one read, then `SettingChanged`, misses retried like the
@@ -395,7 +395,7 @@ runs or shows (bar the Accounts page's trial note).
   client-side); a window asking for client decorations waits up to 250 ms
   for the first answer, else opens with GTK's default,
   `menu:minimize,maximize,close`, and the root's 500 ms poll redraws when
-  it changes. `CLAWDMETER_BUTTON_LAYOUT=<layout>` overrides it (reference
+  it changes. `CLAWDBUDDY_BUTTON_LAYOUT=<layout>` overrides it (reference
   screenshots; empty = unset, `:` = no buttons).
 - Board art is bundled by `ui::Assets` and drawn with
   `img(board.illustration())`. Use `img()`, not `svg()`: `svg()` renders a
@@ -404,7 +404,7 @@ runs or shows (bar the Accounts page's trial note).
   `porting-a-board` skill.
 - **GPUI gotcha:** don't `observe_window_appearance` on X11 (0.2.2 redraws
   inside the portal callback and panics); the root polls the appearance.
-- UI work without hardware: `cargo run -p clawdmeter-app --example demo --
+- UI work without hardware: `cargo run -p clawdbuddy-app --example demo --
   --page device` opens the window with a fake board, live status and local
   release. Point `HOME`/`XDG_CACHE_HOME` at a scratch dir (it writes there).
   Screenshots: `capturing-desktop-screenshots` skill.

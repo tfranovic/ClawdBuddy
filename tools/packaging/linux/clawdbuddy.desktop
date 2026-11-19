@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=ClawdBuddy
+GenericName=Claude Code usage monitor
+Comment=Send your Claude Code usage to a ClawdBuddy over Bluetooth
+Exec=clawdbuddy
+Icon=clawdbuddy
+Terminal=false
+Categories=Utility;
+Keywords=Claude;usage;Bluetooth;
+StartupWMClass=clawdbuddy

@@ -3,11 +3,11 @@
 
 Reads the same cells the desktop app draws (frame 0 of `waving` in
 firmware/src/splash_animations.h, body rows only; see
-desktop/crates/clawdmeter-app/build.rs) and writes, into tools/packaging/icons/:
+desktop/crates/clawdbuddy-app/build.rs) and writes, into tools/packaging/icons/:
 
-  clawdmeter-<N>.png   hicolor sizes (Linux .deb / AppImage / Nix)
-  clawdmeter.ico       Windows installer + Start Menu shortcut
-  clawdmeter.icns      macOS app bundle
+  clawdbuddy-<N>.png   hicolor sizes (Linux .deb / AppImage / Nix)
+  clawdbuddy.ico       Windows installer + Start Menu shortcut
+  clawdbuddy.icns      macOS app bundle
 
 Whole cells, no smoothing. 16 px is point-sampled like the tray icon. Only
 the standard library, so it runs on every release runner. The outputs are
@@ -168,11 +168,11 @@ def embedded(path):
 
 
 def check(body):
-    files = [(OUT / f"clawdmeter-{s}.png", s, (OUT / f"clawdmeter-{s}.png").read_bytes()) for s in PNG_SIZES]
-    files += [(OUT / "clawdmeter.ico", s, d) for s, d in embedded(OUT / "clawdmeter.ico")]
-    files += [(OUT / "clawdmeter.icns", s, d) for s, d in embedded(OUT / "clawdmeter.icns")]
+    files = [(OUT / f"clawdbuddy-{s}.png", s, (OUT / f"clawdbuddy-{s}.png").read_bytes()) for s in PNG_SIZES]
+    files += [(OUT / "clawdbuddy.ico", s, d) for s, d in embedded(OUT / "clawdbuddy.ico")]
+    files += [(OUT / "clawdbuddy.icns", s, d) for s, d in embedded(OUT / "clawdbuddy.icns")]
     stale = sorted({str(path.relative_to(ROOT)) for path, size, data in files if png_pixels(data) != png_pixels(png(size, render(body, size)))})
-    if len(embedded(OUT / "clawdmeter.ico")) != len(ICO_SIZES) or len(embedded(OUT / "clawdmeter.icns")) != len(ICNS_TYPES):
+    if len(embedded(OUT / "clawdbuddy.ico")) != len(ICO_SIZES) or len(embedded(OUT / "clawdbuddy.icns")) != len(ICNS_TYPES):
         stale.append("entry count")
     if stale:
         print("icons differ from the firmware art, rerun tools/packaging/make_icons.py: " + ", ".join(stale))
@@ -194,10 +194,10 @@ def main():
 
     OUT.mkdir(parents=True, exist_ok=True)
     for size in PNG_SIZES:
-        (OUT / f"clawdmeter-{size}.png").write_bytes(get(size))
-    (OUT / "clawdmeter.ico").write_bytes(ico([(s, get(s)) for s in ICO_SIZES]))
-    (OUT / "clawdmeter.icns").write_bytes(icns([(t, get(s)) for t, s in ICNS_TYPES]))
-    print(f"wrote {len(PNG_SIZES)} PNGs, clawdmeter.ico, clawdmeter.icns to {OUT.relative_to(ROOT)}")
+        (OUT / f"clawdbuddy-{size}.png").write_bytes(get(size))
+    (OUT / "clawdbuddy.ico").write_bytes(ico([(s, get(s)) for s in ICO_SIZES]))
+    (OUT / "clawdbuddy.icns").write_bytes(icns([(t, get(s)) for t, s in ICNS_TYPES]))
+    print(f"wrote {len(PNG_SIZES)} PNGs, clawdbuddy.ico, clawdbuddy.icns to {OUT.relative_to(ROOT)}")
     return 0
 
 

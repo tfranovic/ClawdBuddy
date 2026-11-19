@@ -5,12 +5,12 @@ name: Release
 #   manifest.json             {version, boards: [{env, chip, flash_size,
 #                             display_name, file, offset, size, sha256}]}
 #   webtools-<env>.json       ESP Web Tools manifest per board (browser flasher)
-#   clawdmeter-<tag>-*.tar.gz / .zip   desktop app: Linux binary, macOS
-#                             Clawdmeter.app (universal), Windows .exe
-#   clawdmeter-<tag>-macos-universal.dmg     the same app, drag to Applications
-#   clawdmeter-<tag>-windows-x86_64.msi      per-user installer (WiX)
-#   clawdmeter_<version>_amd64.deb           Debian/Ubuntu package (cargo-deb)
-#   clawdmeter-<tag>-x86_64.AppImage         portable Linux build
+#   clawdbuddy-<tag>-*.tar.gz / .zip   desktop app: Linux binary, macOS
+#                             ClawdBuddy.app (universal), Windows .exe
+#   clawdbuddy-<tag>-macos-universal.dmg     the same app, drag to Applications
+#   clawdbuddy-<tag>-windows-x86_64.msi      per-user installer (WiX)
+#   clawdbuddy_<version>_amd64.deb           Debian/Ubuntu package (cargo-deb)
+#   clawdbuddy-<tag>-x86_64.AppImage         portable Linux build
 #   SHA256SUMS
 # Nothing is signed beyond the ad-hoc macOS signature; the README says how
 # to get past Gatekeeper and SmartScreen. Icons and the .desktop entry live in
@@ -124,18 +124,18 @@ jobs:
         shell: bash
         working-directory: desktop
         run: |
-          # `clawdmeter --version`, the logs and the settings sidebar report
-          # this (clawdmeter_app::version()); without it they fall back to
+          # `clawdbuddy --version`, the logs and the settings sidebar report
+          # this (clawdbuddy_app::version()); without it they fall back to
           # the crate version.
-          export CLAWDMETER_VERSION="${TAG#v}"
+          export CLAWDBUDDY_VERSION="${TAG#v}"
           IFS=, read -ra targets <<< "${{ matrix.targets }}"
           for t in "${targets[@]}"; do
-            cargo build --release --locked -p clawdmeter-app --target "$t"
+            cargo build --release --locked -p clawdbuddy-app --target "$t"
           done
       - name: Run Windows executable
         if: runner.os == 'Windows'
         shell: bash
-        run: desktop/target/x86_64-pc-windows-msvc/release/clawdmeter.exe --version
+        run: desktop/target/x86_64-pc-windows-msvc/release/clawdbuddy.exe --version
       - name: Package
         shell: bash
         run: |
@@ -144,8 +144,8 @@ jobs:
           cp README.md stage/
           case "${{ matrix.name }}" in
             linux-*)
-              cp desktop/target/x86_64-unknown-linux-gnu/release/clawdmeter stage/
-              tar -C stage -czf "dist/clawdmeter-$tag-${{ matrix.name }}.tar.gz" .
+              cp desktop/target/x86_64-unknown-linux-gnu/release/clawdbuddy stage/
+              tar -C stage -czf "dist/clawdbuddy-$tag-${{ matrix.name }}.tar.gz" .
               ;;
             macos-*)
               # An app bundle, not a bare binary: CoreBluetooth needs
@@ -153,43 +153,43 @@ jobs:
               # Info.plist, or macOS kills the process when it runs under the
               # LaunchAgent. LSUIElement keeps the tray app out of the Dock.
               # Ad-hoc signed only (no Developer ID), so Gatekeeper asks once.
-              app=stage/Clawdmeter.app
+              app=stage/ClawdBuddy.app
               mkdir -p "$app/Contents/MacOS"
-              lipo -create -output "$app/Contents/MacOS/clawdmeter" \
-                desktop/target/aarch64-apple-darwin/release/clawdmeter \
-                desktop/target/x86_64-apple-darwin/release/clawdmeter
-              lipo -info "$app/Contents/MacOS/clawdmeter"
+              lipo -create -output "$app/Contents/MacOS/clawdbuddy" \
+                desktop/target/aarch64-apple-darwin/release/clawdbuddy \
+                desktop/target/x86_64-apple-darwin/release/clawdbuddy
+              lipo -info "$app/Contents/MacOS/clawdbuddy"
               mkdir -p "$app/Contents/Resources"
-              cp tools/packaging/icons/clawdmeter.icns "$app/Contents/Resources/"
+              cp tools/packaging/icons/clawdbuddy.icns "$app/Contents/Resources/"
               ver="${tag#v}"
               {
                 echo '<?xml version="1.0" encoding="UTF-8"?>'
                 echo '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">'
                 echo '<plist version="1.0"><dict>'
-              echo '  <key>CFBundleIconFile</key><string>clawdmeter</string>'
-                echo '  <key>CFBundleIdentifier</key><string>com.clawdmeter.app</string>'
-                echo '  <key>CFBundleName</key><string>Clawdmeter</string>'
-                echo '  <key>CFBundleExecutable</key><string>clawdmeter</string>'
+              echo '  <key>CFBundleIconFile</key><string>clawdbuddy</string>'
+                echo '  <key>CFBundleIdentifier</key><string>com.tfranovic.clawdbuddy</string>'
+                echo '  <key>CFBundleName</key><string>ClawdBuddy</string>'
+                echo '  <key>CFBundleExecutable</key><string>clawdbuddy</string>'
                 echo '  <key>CFBundlePackageType</key><string>APPL</string>'
                 echo "  <key>CFBundleShortVersionString</key><string>$ver</string>"
                 echo "  <key>CFBundleVersion</key><string>$ver</string>"
                 echo '  <key>LSMinimumSystemVersion</key><string>11.0</string>'
                 echo '  <key>LSUIElement</key><true/>'
-                echo '  <key>NSBluetoothAlwaysUsageDescription</key><string>Clawdmeter sends your Claude Code usage to your Clawdmeter over Bluetooth.</string>'
+                echo '  <key>NSBluetoothAlwaysUsageDescription</key><string>ClawdBuddy sends your Claude Code usage to your ClawdBuddy over Bluetooth.</string>'
                 echo '</dict></plist>'
               } > "$app/Contents/Info.plist"
               plutil -lint "$app/Contents/Info.plist"
               codesign --force --sign - "$app"
               codesign --verify --verbose "$app"
-              tar -C stage -czf "dist/clawdmeter-$tag-${{ matrix.name }}.tar.gz" .
+              tar -C stage -czf "dist/clawdbuddy-$tag-${{ matrix.name }}.tar.gz" .
               # Drag-to-Applications disk image of the same signed bundle,
               # its window laid out by tools/packaging/macos/.
-              tools/packaging/dmg.sh "$app" "dist/clawdmeter-$tag-${{ matrix.name }}.dmg" \
+              tools/packaging/dmg.sh "$app" "dist/clawdbuddy-$tag-${{ matrix.name }}.dmg" \
                 "$RUNNER_TEMP/dmg"
               ;;
             windows-*)
-              cp desktop/target/x86_64-pc-windows-msvc/release/clawdmeter.exe stage/
-              (cd stage && 7z a -tzip "../dist/clawdmeter-$tag-${{ matrix.name }}.zip" .)
+              cp desktop/target/x86_64-pc-windows-msvc/release/clawdbuddy.exe stage/
+              (cd stage && 7z a -tzip "../dist/clawdbuddy-$tag-${{ matrix.name }}.zip" .)
               ;;
           esac
           ls -l stage dist
@@ -198,7 +198,7 @@ jobs:
         shell: bash
         run: |
           ver="${TAG#v}"
-          bin=desktop/target/x86_64-unknown-linux-gnu/release/clawdmeter
+          bin=desktop/target/x86_64-unknown-linux-gnu/release/clawdbuddy
           # The committed icons must match the firmware's art.
           python3 tools/packaging/make_icons.py --check
           # And the disk image's picture and layout what its script says.
@@ -206,14 +206,14 @@ jobs:
           cargo install --locked cargo-deb@3.8.0
           # Debian sorts 1.2.0~rc.1 before 1.2.0; the file keeps the tag's spelling.
           debver=$(printf '%s' "$ver" | sed 's/-/~/')
-          (cd desktop && cargo deb -p clawdmeter-app --no-build \
+          (cd desktop && cargo deb -p clawdbuddy-app --no-build \
             --target x86_64-unknown-linux-gnu --deb-version "$debver" \
-            --output "../dist/clawdmeter_${ver}_amd64.deb")
-          dpkg-deb -I "dist/clawdmeter_${ver}_amd64.deb"
-          dpkg-deb -c "dist/clawdmeter_${ver}_amd64.deb"
-          tools/packaging/appimage.sh "$bin" "dist/clawdmeter-$TAG-x86_64.AppImage" \
+            --output "../dist/clawdbuddy_${ver}_amd64.deb")
+          dpkg-deb -I "dist/clawdbuddy_${ver}_amd64.deb"
+          dpkg-deb -c "dist/clawdbuddy_${ver}_amd64.deb"
+          tools/packaging/appimage.sh "$bin" "dist/clawdbuddy-$TAG-x86_64.AppImage" \
             "$RUNNER_TEMP/appimage"
-          "dist/clawdmeter-$TAG-x86_64.AppImage" --appimage-extract-and-run --version
+          "dist/clawdbuddy-$TAG-x86_64.AppImage" --appimage-extract-and-run --version
       - name: Windows .msi
         if: runner.os == 'Windows'
         shell: bash
@@ -228,12 +228,12 @@ jobs:
           wix="$(cygpath -u "$RUNNER_TEMP")/wix"
           dotnet tool install wix --version 5.0.2 --tool-path "$wix"
           "$wix/wix" extension add -g WixToolset.Util.wixext/5.0.2
-          "$wix/wix" build tools/packaging/wix/clawdmeter.wxs -arch x64 \
+          "$wix/wix" build tools/packaging/wix/clawdbuddy.wxs -arch x64 \
             -d "Version=$ver" \
-            -d "Exe=desktop/target/x86_64-pc-windows-msvc/release/clawdmeter.exe" \
-            -d "Icon=tools/packaging/icons/clawdmeter.ico" \
+            -d "Exe=desktop/target/x86_64-pc-windows-msvc/release/clawdbuddy.exe" \
+            -d "Icon=tools/packaging/icons/clawdbuddy.ico" \
             -ext WixToolset.Util.wixext \
-            -o "dist/clawdmeter-$TAG-${{ matrix.name }}.msi"
+            -o "dist/clawdbuddy-$TAG-${{ matrix.name }}.msi"
           rm -f dist/*.wixpdb
           ls -l dist
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

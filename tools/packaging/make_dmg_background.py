@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Render the background of the macOS disk image's window.
 
-The window shows Clawdmeter.app on the left and the Applications link on
+The window shows ClawdBuddy.app on the left and the Applications link on
 the right (macos/dmg-DS_Store places them; make_dmg_layout.sh writes it from
 the numbers here). This draws what sits between and behind them, in the
 device's default palette: the panel grey, a plate in the text colour under
@@ -146,7 +146,7 @@ def layout_problems():
         return [f"{LAYOUT.name} is missing"]
     data = LAYOUT.read_bytes()
     problems = []
-    for name, want in (("Clawdmeter.app", (APP_X, ICON_Y)), ("Applications", (APPLICATIONS_X, ICON_Y))):
+    for name, want in (("ClawdBuddy.app", (APP_X, ICON_Y)), ("Applications", (APPLICATIONS_X, ICON_Y))):
         # An icon's record: its name in UTF-16, then Iloc, blob, 16, x, y.
         found = re.findall(re.escape(name.encode("utf-16-be")) + rb"Ilocblob\x00\x00\x00\x10(.{8})", data, re.S)
         have = [struct.unpack(">II", f) for f in found]

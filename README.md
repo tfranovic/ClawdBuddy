@@ -1,64 +1,178 @@
-# Clawdmeter with ASCII pets
+# ClawdBuddy
 
-A fork of [HermannBjorgvin/Clawdmeter](https://github.com/HermannBjorgvin/Clawdmeter)
-for the 4-inch Waveshare ESP32-S3-Touch-LCD-4. It shows your Claude Code
-usage limits on a screen on your desk, with an ASCII pet in place of Clawd.
-The pet reacts to what Claude Code is doing, and the screen tells you which
-session is waiting when one needs an answer.
+A desk companion for [Claude Code](https://claude.com/claude-code) on a
+4-inch touch screen. It has two views:
 
-| Meters | Stats | Screensaver | Alert |
-| :---: | :---: | :---: | :---: |
-| ![The meters with the pet in its corner and a Fable card](docs/images/pets/meters.png) | ![The large pet with its mood, fed and energy pips](docs/images/pets/peek.png) | ![The pet asleep on a black screen](docs/images/pets/screensaver.png) | ![An alert line reading Permission: Clawdmeter](docs/images/pets/alert.png) |
-| Weekly and Fable usage | Tap the meters | After a quiet stretch | A session needs you |
+- **The pet view:** your usage limits, with an ASCII pet that reacts to what
+  Claude Code is doing and tells you which session is waiting for you.
+- **The office view:** every running session as a desk in a small office,
+  with its main agent and sub-agents as people who type, think at the
+  whiteboard, wait for you, or take a break at the water cooler.
 
-<sub>Screenshots from the simulator.</sub>
+A menu-bar app on your computer reads Claude Code's usage and hook events and
+sends them to the screen over Bluetooth.
 
-## What you get
+| The pet view | The office view |
+| :---: | :---: |
+| ![The pet view: a pet, its stats, two usage meters and the status rows](docs/images/meters.gif) | ![The office view: sessions at desks, sub-agents on benches, people walking](docs/images/office.gif) |
 
-From the original Clawdmeter, unchanged:
+<sub>All pictures on this page are from the simulator, which runs the same firmware as the board.</sub>
 
-- Usage meters with reset countdowns, read from Claude Code by a menu-bar
-  app and sent to the board over Bluetooth.
-- Alerts with a beep when a session asks for permission or asks a question.
-  They clear when you answer in the terminal.
-- Themes, a clock, a pace marker and the other settings on the app's Device
-  page.
+ClawdBuddy is built from two projects,
+[Clawdmeter](https://github.com/HermannBjorgvin/Clawdmeter) and
+[claude-desktop-buddy](https://github.com/anthropics/claude-desktop-buddy).
+See [Acknowledgements](#acknowledgements).
 
-Added by this fork:
+## Contents
 
-- **ASCII pets.** The 18 pets from
-  [claude-desktop-buddy](https://github.com/anthropics/claude-desktop-buddy)
-  sit in the corner of the meters: idle, busy while Claude works, alert when
-  a session needs you, celebrating a reset, dizzy at 100 %.
-- **Pet screensaver.** After a quiet stretch the pet sleeps, large, on a
-  black screen.
-- **Stats and species.** Tap the meters for the large pet with its level,
-  mood, fed and energy. Tap the left or right third of the screen to change
-  species; tap the middle to go back.
-- **Alerts name the session.** The alert line reads `Permission: my-project`
-  or `Question: my-project`, using the name of the session's working
-  directory, so you know which terminal to go to.
-- **Limit alerts.** When a usage limit stops a session mid-turn, the screen
-  beeps and reads `Limit reached: my-project` instead of carrying on as if
-  Claude were still working. Other API errors read `Stopped on error: …`.
-- **An agent team view.** An optional second screen draws your sessions as
-  an office: a desk per session (a second office opens past six), the main agent behind it, its sub-agents
-  on a bench in front. People type, walk to the whiteboard to think, raise
-  a `?` when they wait for you, and doze between turns. Turn it on with
-  **Agent team view** on the app's Device page, then tap the left or right
-  side of the screen to switch. See [docs/pets.md](docs/pets.md#the-agent-team-view).
-- **A Fable card.** On an account with no 5-hour limit, Fable's weekly limit
-  gets its own meter under the Weekly one.
+- [The pet view](#the-pet-view)
+- [The office view](#the-office-view)
+- [Alerts](#alerts)
+- [Controls](#controls)
+- [Materials](#materials)
+- [Install](#install)
+- [Settings](#settings)
+- [Try it without a board](#try-it-without-a-board)
+- [Build from source](#build-from-source)
+- [Acknowledgements](#acknowledgements)
+- [Licensing](#licensing)
 
-### How the pet's stats move
+## The pet view
+
+| Meters | Pet and stats | Screensaver |
+| :---: | :---: | :---: |
+| ![The meters](docs/images/meters.png) | ![The large pet with its stats](docs/images/stats.png) | ![The pet asleep on a black screen](docs/images/screensaver.png) |
+
+**Usage meters.** Up to two cards with a percentage, a bar and the time to
+the next reset:
+
+- With a 5-hour limit: **Session** and **Weekly**.
+- On an account with no 5-hour limit: **Weekly**, and **Fable** when the
+  account reports Fable's own weekly limit.
+
+An optional pace marker shows how far into each window you are and turns a bar
+amber when usage is ahead of it. A clock sits in the top right corner when the
+app's clock setting is on.
+
+**Three rows under the meters:**
+
+1. A status word that changes while Claude works (`Pondering…`,
+   `Brewing…`), or the alert when a session needs you.
+2. The last session to run a tool, and the tool: `my-project: Bash`.
+3. The number of sessions active in the last 5 minutes.
+
+**The pet.** One of 18 ASCII pets lives in the top left corner, with its
+name, level and three stats beside it.
+
+![All 18 pets](docs/images/pets.png)
+
+What the pet does:
+
+| The pet is… | When |
+| --- | --- |
+| idle | Connected, and Claude Code is quiet |
+| busy | Tools are running |
+| alert | A session needs you; briefly, when you send a prompt |
+| celebrating | A usage window reset; it gained a level |
+| showing hearts | You tapped it; a long turn finished |
+| dizzy | The main meter is at 100 % |
+| asleep | No connection or stale data; on the screensaver |
+
+What moves its stats:
 
 | Stat | What moves it |
 | --- | --- |
-| Level, fed | Rises in the usage meter. On an account with no 5-hour limit: a fed pip per 10 % of the week, a level per full week. With a 5-hour limit: a level per five full sessions. |
-| Mood | How quickly alerts are answered: under 15 seconds is the top mood, over 2 minutes the bottom. Alerts left to time out pull it down. |
-| Energy | 3 of 5 at start-up, full after a rest on the screensaver, one less every 2 hours awake. |
+| **Level** and **fed** | Rises in the main usage meter. With a 5-hour limit: ten fed pips and one level per five full sessions. On an account with no 5-hour limit: a fed pip per 10 % of the week, a level per full week. |
+| **Mood** | How quickly you answer alerts: under 15 seconds is the top mood, over 2 minutes the bottom. Alerts left to time out pull it down. |
+| **Energy** | 3 of 5 at start-up, full after a rest on the screensaver of a minute or more, one less every 2 hours awake. |
 
-The rules and the pet's states are in [docs/pets.md](docs/pets.md).
+The species and the stats are saved on the board and survive a restart or a
+reflash.
+
+**Screensaver.** After a quiet stretch (10 minutes by default) the pet goes to
+sleep, large, on a black screen. A prompt, an alert or a tap wakes it.
+
+More detail: [docs/pet-view.md](docs/pet-view.md).
+
+## The office view
+
+| One office | A break at the water cooler | A second office |
+| :---: | :---: | :---: |
+| ![Four sessions at their desks](docs/images/office.png) | ![People with cups by the water cooler](docs/images/office-break.png) | ![The second of two offices](docs/images/office-2-of-2.png) |
+
+Off by default. Turn on **Agent team view** on the app's Device page, then
+tap the left or right side of the screen.
+
+**Desks.** Each Claude Code session gets a desk, named after its working
+directory. Sessions sit in the order they started, six to an office.
+
+**The main agent** sits behind the desk:
+
+| You see | It means |
+| --- | --- |
+| Typing, monitor lit with scrolling lines | Running tools |
+| Standing at the whiteboard, writing on it | In a turn with no tool call for 10 seconds: thinking, or one long tool |
+| A `?` bubble, the name in orange | Waiting for you: a permission prompt or a question |
+| At the desk with thinking dots | Its turn is over, but its sub-agents are still running |
+| Head down under a `z` | Between turns |
+| At the water cooler with a cup | Between turns for 2 minutes or more |
+
+**Sub-agents** are the smaller people on the bench in front of the desk, in a
+lighter shade of their main agent's colour. Up to four are drawn; `+N` after
+the name counts the rest. Now and then one walks to the whiteboard and back. A
+sub-agent with no activity for 2 minutes waits at the water cooler.
+
+**Coming and going.** Sessions and sub-agents walk in and out through the
+door. A session leaves when it exits, or 15 minutes after its last turn ended.
+When one leaves, the sessions after it move up a desk.
+
+**More than six sessions.** The seventh opens a second office (twelve sessions
+at most), and the bottom line reads `Office 1 of 2`. Someone whose new desk is
+in the other office walks out of one door and in at the other. An office with
+nobody left is removed. While two offices are open, names are cut to 8
+characters.
+
+**Also on screen:** the wall clock shows the real time, the whiteboard fills
+with what people write and is wiped when full, and the bottom line counts
+sessions and sub-agents or shows the alert.
+
+More detail: [docs/office-view.md](docs/office-view.md).
+
+## Alerts
+
+![An alert on the pet view](docs/images/alert.png)
+
+When a session needs you, the board chimes and shows which one:
+
+| Alert | When |
+| --- | --- |
+| `Permission: my-project` | Claude Code asks to run a tool |
+| `Question: my-project` | Claude asks you a question |
+| `Limit reached: my-project` | A usage limit stopped the session mid-turn |
+| `Stopped on error: my-project` | Another API error ended the turn |
+
+The alert clears when you answer in the terminal, when you tap the screen, or
+after 2 minutes. On the office view the same text shows on the bottom line and
+the session's desk gets the `?`.
+
+## Controls
+
+| Where | Tap | Result |
+| --- | --- | --- |
+| Pet view | The pet or its stats | The large pet with its stats |
+| Pet view, office view on | Left or right third of the screen | The next or previous view |
+| Large pet | Left or right third | Previous or next species |
+| Large pet | Middle | Back to the meters |
+| Office view | Left or right third | The next or previous view |
+| Anywhere, during an alert | Anywhere | Dismisses the alert |
+| Screensaver | Anywhere | Wakes the pet |
+
+The views form a ring: the pet view, the first office, the second office when
+there is one. With the office view off, a tap anywhere on the pet view raises
+the large pet.
+
+The board's BOOT button sends a key to your computer (Space by default); the
+app's Device page changes what it sends.
 
 ## Materials
 
@@ -70,120 +184,194 @@ The rules and the pet's states are in [docs/pets.md](docs/pets.md).
   on MakerWorld, to 3D-print.
 - **Cable:** USB-C, one that carries data.
 
+This is the only board ClawdBuddy supports.
+
 ## Install
 
-The fork publishes no releases, so the firmware and the app are built from
-this repository. These steps are for macOS, which is where they were run.
+You need Claude Code, signed in to an account that reports usage limits, and
+a computer with Bluetooth.
 
-You need:
+### 1. Install the app
 
-- [PlatformIO](https://platformio.org/install/cli) for the firmware.
-- [Rust](https://rustup.rs) for the app. The version in
-  `desktop/rust-toolchain.toml` installs itself on the first build.
-- Xcode with its Metal Toolchain: `xcodebuild -runFirstLaunch`, then
-  `xcodebuild -downloadComponent MetalToolchain`.
-- Claude Code, signed in to an account that reports usage limits.
+Download the app for your system from the
+[latest release](https://github.com/tfranovic/ClawdBuddy/releases/latest):
 
-### 1. Flash the board
+| System | File | Status |
+| --- | --- | --- |
+| macOS (Apple silicon and Intel) | `clawdbuddy-<version>-macos-universal.dmg` | Tested on Apple silicon |
+| Windows | `clawdbuddy-<version>-windows-x86_64.msi` | **Not tested** |
+| Linux | `clawdbuddy_<version>_amd64.deb` or `clawdbuddy-<version>-x86_64.AppImage` | **Not tested** |
 
-Plug the board in by its USB port, then:
+The Windows and Linux apps are built by the same release job from the same
+code, but nobody has run them with this firmware. Please open an issue if
+one does not work.
 
-```bash
-pio run -d firmware -e waveshare_lcd_4_pets -t upload
-```
+On macOS the app is not notarised. The first time you open it, macOS blocks
+it: go to **System Settings → Privacy & Security**, click **Open Anyway**,
+then allow Bluetooth access. The app lives in the menu bar.
 
-The board restarts, beeps once and shows the meters with the pet in the
-corner.
+### 2. Flash the board
 
-If the upload can't connect, hold **BOOT**, press and release **PWR** (the
-reset key on this board), release **BOOT**, and run the command again. Press
-**PWR** afterwards to start the firmware.
+Plug the board into your computer by its USB port. The app's setup offers to
+flash it: it downloads the firmware from the same release and writes it over
+USB. You can do this again later from the **Flash** page.
 
-### 2. Build and install the app
+If the board is not found, hold **BOOT**, press and release **PWR** (the
+reset key on this board), release **BOOT**, and try again. Press **PWR**
+afterwards to start the firmware.
 
-```bash
-tools/packaging/local-mac-app.sh
-cp -R desktop/target/dist/Clawdmeter.app /Applications/
-```
+To flash without the app, build from source (below).
 
-Open Clawdmeter from Applications. macOS blocks the first launch because the
-app is only ad-hoc signed: go to **System Settings → Privacy & Security**,
-click **Open Anyway**, then allow Bluetooth access. The app lives in the
-menu bar.
+### 3. Pair and set up
 
-### 3. Set up
-
-1. **Skip the firmware step in setup, and don't use the Flash page.** The app
-   sees the board as a stock `waveshare_lcd_4` and would replace the pet
-   build with the official firmware.
-2. Add `update_check = off` to `~/.config/clawdmeter/config` to stop the
-   update prompts (**Settings** links to the file).
-3. Pair the board: **System Settings → Bluetooth → Connect** next to
-   **Clawdmeter**. It appears as a keyboard.
-4. Open **Hooks** in the app, review the changes to Claude Code's
+1. Pair the board: on macOS, **System Settings → Bluetooth → Connect** next
+   to **ClawdBuddy**. It appears as a keyboard.
+2. Open **Hooks** in the app, review the changes to Claude Code's
    `settings.json`, and save. Sessions that are already running pick the
-   hooks up after a restart.
-5. Turn on **Settings → Start at login** if you want it.
+   hooks up after a restart. **Send a test alert** checks the path from the
+   app to the board.
+3. On the **Device** page, turn on **Agent team view** if you want the
+   office.
+4. Turn on **Settings → Start at login** if you want it.
 
-**Send a test alert** on the Hooks page checks the path from the app to the
-board.
+### Coming from Clawdmeter
+
+ClawdBuddy replaces a Clawdmeter install on the same board:
+
+1. Quit Clawdmeter and delete it. Install and open ClawdBuddy: it moves
+   `~/.config/clawdmeter` to `~/.config/clawdbuddy` the first time it runs.
+2. Flash the board from ClawdBuddy.
+3. Remove **Clawdmeter** from your Bluetooth devices and pair **ClawdBuddy**.
+4. Open **Hooks** and save: the old `clawdmeter hook` entries are replaced.
+5. If Clawdmeter started at login, turn **Start at login** on again and, on
+   macOS, delete `~/Library/LaunchAgents/com.clawdmeter.app.plist`.
 
 ## Settings
 
-Everything in the original [user guide](docs/user-guide.md) applies. The
-fork adds one key to `~/.config/clawdmeter/config`:
+The app's **Device** page sets what the board does:
+
+| Setting | What it does |
+| --- | --- |
+| Colors | The board's colours |
+| Clock | 12-hour, 24-hour or off: the corner clock on the pet view and the wall clock in the office |
+| Liveliness | How much the pet does on its own, from 1 (still) to 5 |
+| Attention animation | How long the pet stays alert for an alert |
+| Pace marker | Marks the elapsed share of each usage window on the bars |
+| Agent team view | Turns the office view on |
+| Button | What the BOOT button sends to your computer |
+| Alert chime, session reset chime | The board's sounds |
+
+The **Hooks** page installs and removes the Claude Code hooks. The
+**Accounts** page picks which Claude Code account's usage is shown when you
+have more than one.
+
+Everything is stored in `~/.config/clawdbuddy/config`
+(`%LOCALAPPDATA%\ClawdBuddy\config` on Windows). Some keys have no switch in
+the app:
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `alert_project` | `on` | Name the waiting session in the alert line. `off` restores the fixed lines, `Permission needed!` and `Question for you`. |
+| `alert_on` | `permission, question, elicitation` | Which alerts the board shows. Add `idle` for one when a session has waited a minute for your next prompt. |
+| `alert_project` | `on` | Name the waiting session in the alert. `off` shows `Permission needed!` and `Question for you`. |
+| `release_repo` | `tfranovic/ClawdBuddy` | Where the app looks for firmware and app updates. |
 
-The chosen species and the pet's stats are kept on the board and survive a
-restart or a reflash.
+### What the app reads and writes
+
+- **Usage** comes from Claude Code's usage endpoint, with the sign-in Claude
+  Code already stored.
+- **Hooks** record the event's name, the session id, the sub-agent id, the
+  tool's name or the notification's type, and the name of the working
+  directory. They never record a prompt, a tool's input or its output.
+- Nothing is sent anywhere except to the board over Bluetooth, and to GitHub
+  when the app checks for an update.
 
 ## Try it without a board
 
-The simulator runs the same firmware in a window:
+The simulator runs the firmware in a window. It needs
+[PlatformIO](https://platformio.org/install/cli) and SDL2
+(`brew install sdl2`, or `apt install libsdl2-dev`).
 
 ```bash
-pio run -d firmware -e sim_pets
+pio run -d firmware -e sim
 cd firmware
+
+# The pet view: the pet, its stats, alerts, the screensaver.
 SIM_FAST=1 SIM_SCENARIO=sim/pets-tour.jsonl \
-SIM_TAPS="6500@240,240;10500@440,400;12500@440,400;14500@40,400;17500@240,240" \
-.pio/build/sim_pets/program
+  SIM_TAPS="6500@120,80;10500@440,400;12500@440,400;14500@40,400;17500@240,240" \
+  .pio/build/sim/program
+
+# The office view.
+SIM_FAST=1 SIM_SCENARIO=sim/team.jsonl SIM_TAPS="3000@440,300" .pio/build/sim/program
+
+# Two offices, and desks closing up.
+SIM_FAST=1 SIM_SCENARIO=sim/team-two-offices.jsonl \
+  SIM_TAPS="3000@440,300;16000@440,300;40000@40,300" .pio/build/sim/program
 ```
 
-That plays a two-minute tour: the seat, the stats and three species changes,
-two alerts, a busy stretch, the screensaver, 100 % and a reset. Click the
-window to tap; `m` raises an alert, `a` cycles activity, `esc` quits.
+Click in the window to tap; `esc` quits.
 
-## Other boards and the stock firmware
+## Build from source
 
-The pet build is a compile-time option (`-DPET_ASCII`). It has environments
-for the 4-inch Waveshare screen (`waveshare_lcd_4_pets`) and the simulator
-(`sim_pets`) only. Every board and environment of the original still builds
-from this tree with Clawd, and gets the two changes that are not behind the
-flag: project-named alerts and the Fable card. For the list of supported
-boards and the official releases, see the
-[original repository](https://github.com/HermannBjorgvin/Clawdmeter#supported-boards).
+See [docs/development.md](docs/development.md) for the firmware, the app, the
+tests and how a release is made. In short:
 
-To go back to the stock firmware, flash it from the app's Flash page.
+```bash
+pio run -d firmware -e waveshare_lcd_4 -t upload   # firmware, over USB
+cargo run --release --manifest-path desktop/Cargo.toml -p clawdbuddy-app
+```
 
-## Docs
+## Acknowledgements
 
-- [ASCII pets](docs/pets.md): the pet build's design, states, stats rules and files.
-- [User guide](docs/user-guide.md): device controls, settings, and connection help.
-- [Development](docs/development.md): builds, simulator, and releases.
-- [BLE protocol](docs/protocol.md): payload fields and notifications.
-- [Clawd's director](docs/clawd-director.md): the behaviour rules the pet follows too.
-- [Add a board](docs/porting/adding-a-board.md): hardware ports and app integration.
+ClawdBuddy is a combination of two projects. Neither is affiliated with it.
+
+**[Clawdmeter](https://github.com/HermannBjorgvin/Clawdmeter) by Hermann
+Björgvin Haraldsson and its contributors.** ClawdBuddy started as a fork of
+Clawdmeter and most of its code is Clawdmeter's:
+
+- The firmware's foundation: the Waveshare board support, Bluetooth, the
+  payload parser, the usage meters and their layout, themes, the clock, the
+  pace marker, chimes, the button actions, the simulator, and the "director"
+  that decides when the mascot idles, reacts, alerts and goes to the
+  screensaver. The pets are driven by that director in the mascot's place.
+- The desktop app: reading usage, the hook installer and hook handling,
+  alerts, Bluetooth, the flasher, the settings window and the tray.
+- The release tooling and packaging.
+
+What ClawdBuddy changed in it: the support for every other board was removed,
+the Clawd mascot was replaced by the pets, the pet view's layout and the
+office view were added, along with sub-agent tracking, limit alerts, alerts
+that name their session, the tool and session rows, and the Fable meter on
+weekly-only accounts.
+
+**[claude-desktop-buddy](https://github.com/anthropics/claude-desktop-buddy)
+by Anthropic.** The 18 ASCII pets come from it:
+
+- The species files in `firmware/src/pet/buddies/` are its code, unchanged
+  apart from a build guard.
+- `firmware/src/pet/pet_buddy.cpp` is a port of its drawing helpers, changed
+  to draw into a plain pixel buffer so the pets also run in the simulator.
+- The rules for the pet's stats (`firmware/src/pet/pet_stats_core.cpp`)
+  follow its design, adapted to the inputs this device receives.
+
+Also used: the 5×7 font from Adafruit's GFX library (BSD), for the pets.
 
 ## Licensing
 
-The pet code under `firmware/src/pet/buddies/` comes from
-claude-desktop-buddy and is MIT-licensed
-([LICENSE-buddy](firmware/src/pet/LICENSE-buddy)).
+See [LICENSE](LICENSE). In short:
 
-The rest carries the original repository's warning, which still applies
-here because its fonts and Clawd assets remain in this tree:
+- **ClawdBuddy's own additions** (the office view, the pet integration and
+  the changes listed above) are MIT-licensed, © 2026 Tin Franovic.
+- **The pet code from claude-desktop-buddy** is MIT-licensed, © 2026
+  Anthropic, PBC ([LICENSE-buddy](firmware/src/pet/LICENSE-buddy)).
+- **Code inherited from Clawdmeter** stays under Clawdmeter's terms. Its
+  desktop crates are declared MIT; its repository has no licence file, and
+  its author's warning applies to this repository too, because the same
+  fonts and artwork are still in this tree:
 
-> The software in this repository uses and adheres to the Anthropic brand guidelines and uses the same proprietary fonts that Anthropic has a license for but this software uses without permission as well as using assets from Anthropic such as the copyrighted Clawd mascot so even though the code in this repo is non-proprietary I will not license it myself under a copyleft license since this repo includes proprietary fonts and copyrighted assets. Please be aware of this if you fork or copy the code from this repo. **You have been warned!**
+  > The software in this repository uses and adheres to the Anthropic brand guidelines and uses the same proprietary fonts that Anthropic has a license for but this software uses without permission as well as using assets from Anthropic such as the copyrighted Clawd mascot so even though the code in this repo is non-proprietary I will not license it myself under a copyleft license since this repo includes proprietary fonts and copyrighted assets. Please be aware of this if you fork or copy the code from this repo. **You have been warned!**
+
+- **The fonts** (Styrene, Tiempos) and **the Clawd artwork** belong to their
+  owners and are not covered by any licence here.
+
+"Claude" and "Claude Code" are Anthropic's. ClawdBuddy is an unofficial
+project and is not affiliated with or endorsed by Anthropic.

@@ -2,7 +2,7 @@
 #include <stdint.h>
 
 // The face's rise and drop as a pure function of elapsed time
-// (docs/clawd-director.md, "The face's motion"). No LVGL, no Arduino: the
+// (docs/pets.md, "The face's motion"). No LVGL, no Arduino: the
 // same (move, t, geometry) always gives the same pose, so it's unit-tested on
 // the host and the durations never depend on frame rate.
 //

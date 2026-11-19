@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build Clawdmeter.app for this Mac from the working tree (the fork's local
+# Build ClawdBuddy.app for this Mac from the working tree (the fork's local
 # install; the release workflow builds the universal one the same way).
 #
 #   tools/packaging/local-mac-app.sh [out-dir]     default: desktop/target/dist
@@ -10,30 +10,30 @@ set -euo pipefail
 
 root=$(cd "$(dirname "$0")/../.." && pwd)
 out=${1:-"$root/desktop/target/dist"}
-app="$out/Clawdmeter.app"
+app="$out/ClawdBuddy.app"
 
-(cd "$root/desktop" && cargo build --release -p clawdmeter-app)
-bin="$root/desktop/target/release/clawdmeter"
+(cd "$root/desktop" && cargo build --release -p clawdbuddy-app)
+bin="$root/desktop/target/release/clawdbuddy"
 ver=$("$bin" --version | awk '{print $2}')
 
 rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
-cp "$bin" "$app/Contents/MacOS/clawdmeter"
-cp "$root/tools/packaging/icons/clawdmeter.icns" "$app/Contents/Resources/"
+cp "$bin" "$app/Contents/MacOS/clawdbuddy"
+cp "$root/tools/packaging/icons/clawdbuddy.icns" "$app/Contents/Resources/"
 cat > "$app/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-  <key>CFBundleIconFile</key><string>clawdmeter</string>
-  <key>CFBundleIdentifier</key><string>com.clawdmeter.app</string>
-  <key>CFBundleName</key><string>Clawdmeter</string>
-  <key>CFBundleExecutable</key><string>clawdmeter</string>
+  <key>CFBundleIconFile</key><string>clawdbuddy</string>
+  <key>CFBundleIdentifier</key><string>com.tfranovic.clawdbuddy</string>
+  <key>CFBundleName</key><string>ClawdBuddy</string>
+  <key>CFBundleExecutable</key><string>clawdbuddy</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>$ver</string>
   <key>CFBundleVersion</key><string>$ver</string>
   <key>LSMinimumSystemVersion</key><string>11.0</string>
   <key>LSUIElement</key><true/>
-  <key>NSBluetoothAlwaysUsageDescription</key><string>Clawdmeter sends your Claude Code usage to your Clawdmeter over Bluetooth.</string>
+  <key>NSBluetoothAlwaysUsageDescription</key><string>ClawdBuddy sends your Claude Code usage to your ClawdBuddy over Bluetooth.</string>
 </dict></plist>
 PLIST
 plutil -lint "$app/Contents/Info.plist"

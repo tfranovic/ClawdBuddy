@@ -16,7 +16,7 @@ against the file on disk, and writes dist/manifest.json:
       ]
     }
 
-The desktop flasher (desktop/crates/clawdmeter-flash) reads this file from the
+The desktop flasher (desktop/crates/clawdbuddy-flash) reads this file from the
 latest GitHub Release; `file` is the release asset name, always written at
 `offset` 0. Adding a board: give it a DISPLAY_NAMES entry below. An env with no
 entry still ships (named after the env) but the run prints a warning.

@@ -8,7 +8,7 @@ macro_rules! platforms {
             #[cfg(any($(target_os = $platform),*))]
             pub use self::$module::*;
 
-            // Clawdmeter patch: newer libc dropped ENOATTR on Linux, where
+            // ClawdBuddy patch: newer libc dropped ENOATTR on Linux, where
             // it was always an alias of ENODATA.
             #[cfg(all(any($(target_os = $platform),*), any(target_os = "linux", target_os = "android")))]
             pub const ENOATTR: ::libc::c_int = ::libc::ENODATA;

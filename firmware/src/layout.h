@@ -10,7 +10,7 @@
 // the type and spacing. A panel takes the largest design that fits it, then
 // a few rules adapt it: narrow panels shorten labels and tighten spacing,
 // tall ones share out their spare height, a short one squeezes, a landscape
-// strip puts the cards side by side, and a round one keeps inside its circle. See docs/porting/adding-a-board.md.
+// strip puts the cards side by side, and a round one keeps inside its circle. See layout.cpp.
 
 // The panel: its pixel size, and whether the glass is a circle inscribed in
 // that rectangle (BoardCaps.round_panel).

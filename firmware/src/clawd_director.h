@@ -21,7 +21,7 @@
 // attention, fresh-window joy, long-turn wave, and the tap-on-the-meters
 // peek. The lurk trip and idle acts are the corner's own secondary action.
 // Minimal mode collapses all of it to a still Clawd. See
-// docs/clawd-director.md.
+// docs/pets.md.
 
 enum DirectorRoom { ROOM_METERS, ROOM_FACE };
 

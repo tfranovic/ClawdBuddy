@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Build the macOS disk image: Clawdmeter.app beside an Applications link, in
+# Build the macOS disk image: ClawdBuddy.app beside an Applications link, in
 # a window laid out by macos/dmg-DS_Store over the picture from
 # make_dmg_background.py.
 #
-#   tools/packaging/dmg.sh <Clawdmeter.app> <out.dmg> [workdir]
+#   tools/packaging/dmg.sh <ClawdBuddy.app> <out.dmg> [workdir]
 #
 # The app must already be signed; the image carries it as it is. Uses only
 # what macOS ships (ditto, tiffutil, hdiutil, codesign).
@@ -51,11 +51,11 @@ cleanup() {
 trap cleanup EXIT
 
 # The layout names these: the volume, the app and the picture's path.
-volname=Clawdmeter
+volname=ClawdBuddy
 root="$work/dmgroot"
 rm -rf "$root"
 mkdir -p "$root/.background" "$(dirname "$out")"
-ditto "$app" "$root/Clawdmeter.app"
+ditto "$app" "$root/ClawdBuddy.app"
 ln -s /Applications "$root/Applications"
 cp "$here/macos/dmg-DS_Store" "$root/.DS_Store"
 # One TIFF holding the picture at 1x and 2x, which Finder picks from.
@@ -72,7 +72,7 @@ mkdir -p "$mnt"
 retry hdiutil attach "$out" -readonly -nobrowse -noautoopen -quiet -mountpoint "$mnt"
 attached=1
 status=0
-codesign --verify --verbose "$mnt/Clawdmeter.app" || status=$?
+codesign --verify --verbose "$mnt/ClawdBuddy.app" || status=$?
 for item in Applications .DS_Store .background/background.tiff; do
   [ -e "$mnt/$item" ] || [ -L "$mnt/$item" ] || { echo "the image has no $item" >&2; status=1; }
 done

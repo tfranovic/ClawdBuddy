@@ -1,0 +1,27 @@
+# Quiet payloads, one every 8 s: for walking through the species on the large pet.
+#   SIM_FAST=1 SIM_SCENARIO=sim/pets-gallery.jsonl .pio/build/sim/program
+# Click the pet, then the right side of the screen for the next species.
+{"name":"idle 0","hold_ms":8000,"w":34.0,"wr":3372,"wf":9,"st":"allowed","ok":true,"acct":"week","t":1785493800,"tf":24,"a":0,"n":1,"lt":"ClawdBuddy: Edit"}
+{"name":"idle 1","hold_ms":8000,"w":34.0,"wr":3372,"wf":9,"st":"allowed","ok":true,"acct":"week","t":1785493808,"tf":24,"a":0,"n":1,"lt":"ClawdBuddy: Edit"}
+{"name":"idle 2","hold_ms":8000,"w":34.0,"wr":3372,"wf":9,"st":"allowed","ok":true,"acct":"week","t":1785493816,"tf":24,"a":0,"n":1,"lt":"ClawdBuddy: Edit"}
+{"name":"idle 3","hold_ms":8000,"w":34.0,"wr":3372,"wf":9,"st":"allowed","ok":true,"acct":"week","t":1785493824,"tf":24,"a":0,"n":1,"lt":"ClawdBuddy: Edit"}
+{"name":"idle 4","hold_ms":8000,"w":34.0,"wr":3372,"wf":9,"st":"allowed","ok":true,"acct":"week","t":1785493832,"tf":24,"a":0,"n":1,"lt":"ClawdBuddy: Edit"}
+{"name":"idle 5","hold_ms":8000,"w":34.0,"wr":3372,"wf":9,"st":"allowed","ok":true,"acct":"week","t":1785493840,"tf":24,"a":0,"n":1,"lt":"ClawdBuddy: Edit"}
+{"name":"idle 6","hold_ms":8000,"w":34.0,"wr":3372,"wf":9,"st":"allowed","ok":true,"acct":"week","t":1785493848,"tf":24,"a":0,"n":1,"lt":"ClawdBuddy: Edit"}
+{"name":"idle 7","hold_ms":8000,"w":34.0,"wr":3371,"wf":9,"st":"allowed","ok":true,"acct":"week","t":1785493856,"tf":24,"a":0,"n":1,"lt":"ClawdBuddy: Edit"}
+{"name":"idle 8","hold_ms":8000,"w":34.0,"wr":3371,"wf":9,"st":"allowed","ok":true,"acct":"week","t":1785493864,"tf":24,"a":0,"n":1,"lt":"ClawdBuddy: Edit"}
+{"name":"idle 9","hold_ms":8000,"w":34.0,"wr":3371,"wf":9,"st":"allowed","ok":true,"acct":"week","t":1785493872,"tf":24,"a":0,"n":1,"lt":"ClawdBuddy: Edit"}
+{"name":"idle 10","hold_ms":8000,"w":34.0,"wr":3371,"wf":9,"st":"allowed","ok":true,"acct":"week","t":1785493880,"tf":24,"a":0,"n":1,"lt":"ClawdBuddy: Edit"}
+{"name":"idle 11","hold_ms":8000,"w":34.0,"wr":3371,"wf":9,"st":"allowed","ok":true,"acct":"week","t":1785493888,"tf":24,"a":0,"n":1,"lt":"ClawdBuddy: Edit"}
+{"name":"idle 12","hold_ms":8000,"w":34.0,"wr":3371,"wf":9,"st":"allowed","ok":true,"acct":"week","t":1785493896,"tf":24,"a":0,"n":1,"lt":"ClawdBuddy: Edit"}
+{"name":"idle 13","hold_ms":8000,"w":34.0,"wr":3371,"wf":9,"st":"allowed","ok":true,"acct":"week","t":1785493904,"tf":24,"a":0,"n":1,"lt":"ClawdBuddy: Edit"}
+{"name":"idle 14","hold_ms":8000,"w":34.0,"wr":3370,"wf":9,"st":"allowed","ok":true,"acct":"week","t":1785493912,"tf":24,"a":0,"n":1,"lt":"ClawdBuddy: Edit"}
+{"name":"idle 15","hold_ms":8000,"w":34.0,"wr":3370,"wf":9,"st":"allowed","ok":true,"acct":"week","t":1785493920,"tf":24,"a":0,"n":1,"lt":"ClawdBuddy: Edit"}
+{"name":"idle 16","hold_ms":8000,"w":34.0,"wr":3370,"wf":9,"st":"allowed","ok":true,"acct":"week","t":1785493928,"tf":24,"a":0,"n":1,"lt":"ClawdBuddy: Edit"}
+{"name":"idle 17","hold_ms":8000,"w":34.0,"wr":3370,"wf":9,"st":"allowed","ok":true,"acct":"week","t":1785493936,"tf":24,"a":0,"n":1,"lt":"ClawdBuddy: Edit"}
+{"name":"idle 18","hold_ms":8000,"w":34.0,"wr":3370,"wf":9,"st":"allowed","ok":true,"acct":"week","t":1785493944,"tf":24,"a":0,"n":1,"lt":"ClawdBuddy: Edit"}
+{"name":"idle 19","hold_ms":8000,"w":34.0,"wr":3370,"wf":9,"st":"allowed","ok":true,"acct":"week","t":1785493952,"tf":24,"a":0,"n":1,"lt":"ClawdBuddy: Edit"}
+{"name":"idle 20","hold_ms":8000,"w":34.0,"wr":3370,"wf":9,"st":"allowed","ok":true,"acct":"week","t":1785493960,"tf":24,"a":0,"n":1,"lt":"ClawdBuddy: Edit"}
+{"name":"idle 21","hold_ms":8000,"w":34.0,"wr":3369,"wf":9,"st":"allowed","ok":true,"acct":"week","t":1785493968,"tf":24,"a":0,"n":1,"lt":"ClawdBuddy: Edit"}
+{"name":"idle 22","hold_ms":8000,"w":34.0,"wr":3369,"wf":9,"st":"allowed","ok":true,"acct":"week","t":1785493976,"tf":24,"a":0,"n":1,"lt":"ClawdBuddy: Edit"}
+{"name":"idle 23","hold_ms":8000,"w":34.0,"wr":3369,"wf":9,"st":"allowed","ok":true,"acct":"week","t":1785493984,"tf":24,"a":0,"n":1,"lt":"ClawdBuddy: Edit"}

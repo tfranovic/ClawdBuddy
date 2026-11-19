@@ -9,7 +9,7 @@
 #endif
 #include <Preferences.h>
 
-#define DEVICE_NAME "Clawdmeter"
+#define DEVICE_NAME "ClawdBuddy"
 
 // Custom GATT UUIDs for data channel
 #define SERVICE_UUID        "4c41555a-4465-7669-6365-000000000001"
@@ -183,7 +183,7 @@ static void start_advertising() {
     NimBLEAdvertising* adv = NimBLEDevice::getAdvertising();
     adv->reset();
     // Primary advertising packet (≤31 bytes):
-    //   flags (3) + appearance (4) + HID service 0x1812 (4) + name "Clawdmeter" (12)
+    //   flags (3) + appearance (4) + HID service 0x1812 (4) + name "ClawdBuddy" (12)
     //   = 23 bytes. macOS Bluetooth Settings only surfaces BLE-only devices
     //   that explicitly advertise the standard HID service UUID (0x1812) —
     //   without it the device is recognized internally but hidden from the
@@ -420,7 +420,7 @@ static int collect_stale_cccd(int obj_type, union ble_store_value* val, void* co
 // otherwise fill the CCCD store, then tell them (Service Changed, held by
 // NimBLE for each bonded host that subscribed to it until it reconnects).
 // Hosts re-subscribe after rediscovering. Hosts that don't act on Service
-// Changed need the board forgotten and paired again (docs/user-guide.md).
+// Changed need the board forgotten and paired again (README.md).
 static void gatt_revision_check() {
     prefs.begin("clawd", true);
     const int seen = prefs.getInt("gatt_rev", 1);
@@ -467,7 +467,7 @@ void ble_init(void) {
     // --- HID keyboard service ---
     hid_dev = new NimBLEHIDDevice(server);
     hid_dev->setReportMap((uint8_t*)HID_REPORT_MAP, sizeof(HID_REPORT_MAP));
-    hid_dev->setManufacturer("Clawdmeter");
+    hid_dev->setManufacturer("ClawdBuddy");
     // PnP ID: (vendorIdSource, vendorId, productId, version).
     // Source 1 = Bluetooth SIG, vendor 0x02E5 = Espressif. Don't claim
     // Apple's IDs (USB vendor 0x05AC): macOS validates Apple-claimed HIDs

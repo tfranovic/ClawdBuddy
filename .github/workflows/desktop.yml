@@ -50,7 +50,7 @@ jobs:
     # is also linted: its CoreBluetooth paths can't be cross-checked from
     # Linux (Windows can, see desktop/CLAUDE.md). Otherwise the GUI/BLE/flash
     # crates are covered by the release build on each OS.
-    name: clawdmeter-core tests${{ matrix.lint && ' + workspace clippy' || '' }} (${{ matrix.os }})
+    name: clawdbuddy-core tests${{ matrix.lint && ' + workspace clippy' || '' }} (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -68,6 +68,6 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: desktop
-      - run: cargo test -p clawdmeter-core --locked
+      - run: cargo test -p clawdbuddy-core --locked
       - if: matrix.lint
         run: cargo clippy --workspace --all-targets --locked -- -D warnings

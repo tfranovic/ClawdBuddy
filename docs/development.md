@@ -1,57 +1,74 @@
 # Development
 
-Run commands from the repository root unless shown otherwise.
+## Layout
 
-## Build from source
+| Folder | What is there |
+| --- | --- |
+| `firmware/` | The board's firmware (PlatformIO, Arduino, LVGL) and its simulator |
+| `firmware/src/pet/` | The pets and the office view |
+| `firmware/sim/` | Scenarios for the simulator |
+| `firmware/test/` | Host unit tests |
+| `desktop/` | The app (Rust, GPUI): four crates, `clawdbuddy-core`, `-ble`, `-flash`, `-app` |
+| `tools/ci/`, `tools/packaging/` | What the release job runs |
+| `docs/` | [The pet view](pet-view.md), [the office view](office-view.md), [the Bluetooth protocol](protocol.md) |
 
-Firmware uses PlatformIO. Select the environment for your board:
+## Firmware
+
+Needs [PlatformIO](https://platformio.org/install/cli).
 
 ```bash
-pio run -d firmware -e waveshare_amoled_216
-pio run -d firmware -e waveshare_amoled_216 -t upload --upload-port /dev/ttyACM0
-pio test -d firmware -e native
+pio run -d firmware -e waveshare_lcd_4              # build
+pio run -d firmware -e waveshare_lcd_4 -t upload    # build and flash over USB
+pio test -d firmware -e native                      # unit tests, on your computer
 ```
 
-Environments are listed in `firmware/platformio.ini`. macOS ports use
-`/dev/cu.usbmodem*`; Windows ports use `COMn`. A bare `pio run -d firmware`
-builds the default hardware environments and simulator.
+There are three environments: `waveshare_lcd_4` (the board), `sim` (the
+simulator) and `native` (the tests).
 
-If a build fails on a framework header that exists, such as
-`SD.cpp: fatal error: ff.h`, an env with `lib_ignore` has left the shared
-framework package edited (a metadata scan, which the VS Code extension runs
-whenever it loads such an env, applies the edit without undoing it). Run
-`python3 tools/ci/restore_pio_build_scripts.py` before building the failing
-env; the next scan of a `lib_ignore` env edits it again.
+## Simulator
 
-The desktop app uses Rust 1.90 or newer. Install the Linux packages listed
-in [the build dependency action](../.github/actions/linux-desktop-deps/action.yml), then:
+Needs SDL2 (`brew install sdl2`, or `apt install libsdl2-dev`).
+
+```bash
+pio run -d firmware -e sim
+cd firmware && SIM_SCENARIO=sim/team.jsonl .pio/build/sim/program
+```
+
+| Variable | Meaning |
+| --- | --- |
+| `SIM_SCENARIO` | A `.jsonl` file: one payload per line, each with `hold_ms` |
+| `SIM_TAPS` | Scripted taps: `ms@x,y;ms@x,y` |
+| `SIM_SHOTS` | Screenshots: `ms:path.bmp,ms:path.bmp` |
+| `SIM_TRACE=1` | Print what the director decides |
+| `SDL_VIDEODRIVER=dummy` | Run without a window |
+
+The mouse is the touch screen; `m` raises an alert, `a` cycles activity,
+`esc` quits. The pictures in the README were made this way.
+
+## The app
+
+Needs [Rust](https://rustup.rs); the version in `desktop/rust-toolchain.toml`
+installs itself. On macOS it also needs Xcode with its Metal Toolchain
+(`xcodebuild -downloadComponent MetalToolchain`).
 
 ```bash
 cd desktop
-cargo run -p clawdmeter-app --release
 cargo test --workspace
+cargo run --release -p clawdbuddy-app
 ```
 
-The workspace separates usage/configuration (`clawdmeter-core`), Bluetooth
-(`clawdmeter-ble`), firmware downloads and flashing (`clawdmeter-flash`), and
-the tray, GPUI window, and hook integration (`clawdmeter-app`).
+`tools/packaging/local-mac-app.sh` builds an ad-hoc signed
+`desktop/target/dist/ClawdBuddy.app` for the Mac you are on.
 
-## Simulator and releases
+## Releases
 
-Use the [firmware simulator](simulator.md) to review layouts and Clawd's
-behavior without hardware. See [font generation](fonts.md) for font builds.
-Desktop reference images are in
-[desktop/docs/screenshots](../desktop/docs/screenshots/).
+Pushing a tag like `v0.1.0` runs `.github/workflows/release.yml`, which
+publishes a GitHub release with:
 
-The [release workflow](../.github/workflows/release.yml) accepts tags in the
-form `vMAJOR.MINOR.PATCH`, with an optional prerelease suffix. It builds
-merged board images for address `0x0`, desktop archives, checksums, a
-`manifest.json` for the app, and ESP Web Tools manifests. Tags with a
-hyphen publish prereleases, which the normal update check ignores.
+- the firmware image for the board and `manifest.json`, which the app's Flash
+  page reads;
+- the app for macOS (`.dmg`, universal), Windows (`.msi`, `.zip`) and Linux
+  (`.deb`, AppImage, `.tar.gz`).
 
-See the [porting guide](porting/adding-a-board.md) for the full checklist.
-A new board needs a display-name entry in `tools/ci/make_manifest.py` as
-well as its firmware environment and desktop board assets. Firmware CI
-builds the boards, runs native tests, and captures the simulator. Desktop
-CI runs formatting, linting, and workspace tests on Linux, plus core tests
-on macOS and Windows.
+The app looks for releases in `tfranovic/ClawdBuddy` (`release_repo` in its
+config). The tag is the version: the firmware and the app both report it.

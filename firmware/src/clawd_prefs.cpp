@@ -22,7 +22,7 @@ static int32_t btn_actions[BTN_SLOT_COUNT] = {
 
 void clawd_prefs_init(void) {
     Preferences prefs;
-    prefs.begin("clawdmeter", true);
+    prefs.begin("clawdbuddy", true);
     const int lively = prefs.getUChar("lively", CLAWD_LIVELINESS_DEFAULT);
     const int attn = prefs.getUChar("attn_anim", CLAWD_ATTN_ANIM_DEFAULT_S);
     const bool pace = prefs.getUChar("pace_mark", 0) != 0;
@@ -42,7 +42,7 @@ void clawd_prefs_init(void) {
 void theme_prefs_load(void) {
     if (board_caps().mono_panel) return;   // 1-bit: the default palette only
     Preferences prefs;
-    prefs.begin("clawdmeter", true);
+    prefs.begin("clawdbuddy", true);
     char hex[THEME_HEX_LEN + 1] = {};
     const size_t n = prefs.isKey("theme") ? prefs.getBytes("theme", hex, THEME_HEX_LEN) : 0;
     prefs.end();
@@ -52,14 +52,14 @@ void theme_prefs_load(void) {
         clawd_anim_recolor();
         Serial.printf("Theme: %s (saved)\n", hex);
     }
-    prefs.begin("clawdmeter", true);
+    prefs.begin("clawdbuddy", true);
     if (prefs.isKey("fable_col")) theme_fable_set((uint32_t)prefs.getInt("fable_col", (int32_t)theme_fable_hex()));
     prefs.end();
 }
 
 static void save(const char* key, uint8_t v) {
     Preferences prefs;
-    prefs.begin("clawdmeter", false);
+    prefs.begin("clawdbuddy", false);
     prefs.putUChar(key, v);
     prefs.end();
 }
@@ -102,7 +102,7 @@ void button_action_set(ButtonSlot slot, int32_t action) {
     if (action == btn_actions[slot]) return;
     btn_actions[slot] = action;
     Preferences prefs;
-    prefs.begin("clawdmeter", false);
+    prefs.begin("clawdbuddy", false);
     prefs.putInt(BTN_KEYS[slot], action);
     prefs.end();
     Serial.printf("Button %d action: 0x%lx\n", (int)slot + 1, (unsigned long)action);
@@ -117,7 +117,7 @@ void fable_color_set(uint32_t rgb) {
     if (board_caps().mono_panel) return;   // 1-bit: no overlay to colour
     if (!theme_fable_set(rgb)) return;
     Preferences prefs;
-    prefs.begin("clawdmeter", false);
+    prefs.begin("clawdbuddy", false);
     prefs.putInt("fable_col", (int32_t)theme_fable_hex());
     prefs.end();
     ui_apply_theme();
@@ -130,7 +130,7 @@ void theme_set(const uint32_t p[TH_COUNT]) {
     char hex[THEME_HEX_LEN + 1];
     theme_format_hex(p, hex);
     Preferences prefs;
-    prefs.begin("clawdmeter", false);
+    prefs.begin("clawdbuddy", false);
     prefs.putBytes("theme", hex, THEME_HEX_LEN);
     prefs.end();
     ui_apply_theme();

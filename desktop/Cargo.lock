@@ -993,13 +993,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "clawdmeter-app"
+name = "clawdbuddy-app"
 version = "0.1.0"
 dependencies = [
  "chrono",
- "clawdmeter-ble",
- "clawdmeter-core",
- "clawdmeter-flash",
+ "clawdbuddy-ble",
+ "clawdbuddy-core",
+ "clawdbuddy-flash",
  "dbus",
  "dispatch2",
  "embed-resource",
@@ -1021,11 +1021,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "clawdmeter-ble"
+name = "clawdbuddy-ble"
 version = "0.1.0"
 dependencies = [
  "btleplug",
- "clawdmeter-core",
+ "clawdbuddy-core",
  "dbus",
  "futures",
  "log",
@@ -1034,7 +1034,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "clawdmeter-core"
+name = "clawdbuddy-core"
 version = "0.1.0"
 dependencies = [
  "chrono",
@@ -1051,10 +1051,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "clawdmeter-flash"
+name = "clawdbuddy-flash"
 version = "0.1.0"
 dependencies = [
- "clawdmeter-core",
+ "clawdbuddy-core",
  "espflash",
  "log",
  "serde",

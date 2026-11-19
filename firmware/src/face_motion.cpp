@@ -2,7 +2,7 @@
 #include <math.h>
 
 // All distances are authored on a 480 px panel and scaled by the shorter side;
-// times are absolute ms. See docs/clawd-director.md, "The face's motion".
+// times are absolute ms. See docs/pets.md, "The face's motion".
 
 // Rise: ease-out to OVER past rest, then a spring settle.
 #define RISE_UP_MS      500     // ease-out leg, ends at the overshoot apex

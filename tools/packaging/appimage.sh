@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build the Linux AppImage from a release binary.
 #
-#   tools/packaging/appimage.sh <clawdmeter binary> <output .AppImage> <work dir>
+#   tools/packaging/appimage.sh <clawdbuddy binary> <output .AppImage> <work dir>
 #
 # linuxdeploy bundles the libraries the binary links, minus its excludelist
 # (glibc, libxcb, ...) and minus libdbus-1 and the libsystemd chain under it:
@@ -41,8 +41,8 @@ appdir=$work/AppDir
 rm -rf "$appdir"
 icons=()
 for s in 16 24 32 48 64 128 256 512; do
-  install -Dm644 "$here/icons/clawdmeter-$s.png" "$appdir/usr/share/icons/hicolor/${s}x$s/apps/clawdmeter.png"
-  icons+=(--icon-file "$appdir/usr/share/icons/hicolor/${s}x$s/apps/clawdmeter.png")
+  install -Dm644 "$here/icons/clawdbuddy-$s.png" "$appdir/usr/share/icons/hicolor/${s}x$s/apps/clawdbuddy.png"
+  icons+=(--icon-file "$appdir/usr/share/icons/hicolor/${s}x$s/apps/clawdbuddy.png")
 done
 
 # The runners have no FUSE; the tools unpack themselves instead. The plugin
@@ -52,7 +52,7 @@ export PATH="$work/tools:$PATH"
 (cd "$work" && linuxdeploy-x86_64.AppImage \
   --appdir "$appdir" \
   --executable "$bin" \
-  --desktop-file "$here/linux/clawdmeter.desktop" \
+  --desktop-file "$here/linux/clawdbuddy.desktop" \
   "${icons[@]}" \
   --exclude-library 'libdbus-1.so*' --exclude-library 'libsystemd.so*' \
   --exclude-library 'libgcrypt.so*' --exclude-library 'libgpg-error.so*' \

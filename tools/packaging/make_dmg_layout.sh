@@ -6,13 +6,13 @@
 #   tools/packaging/make_dmg_layout.sh
 #
 # Run it on a Mac when make_dmg_background.py's sizes or positions change,
-# and commit the result. It mounts a scratch volume named Clawdmeter and has
+# and commit the result. It mounts a scratch volume named ClawdBuddy and has
 # Finder lay its window out, so Finder shows that window for a moment and may
 # ask to be automated. Only what macOS ships, plus python3 for the numbers.
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
-volume=/Volumes/Clawdmeter
+volume=/Volumes/ClawdBuddy
 [ ! -e "$volume" ] || { echo "$volume is mounted; eject it first" >&2; exit 1; }
 
 # Finder's window bounds include the title bar; the picture fills the rest.
@@ -28,7 +28,7 @@ top=$((screen - bottom - height - title_bar))
 
 # A fixed scratch folder: Finder records the image's path in the layout, and
 # that file ships in every release.
-work=/tmp/clawdmeter-dmg-layout
+work=/tmp/clawdbuddy-dmg-layout
 rm -rf "$work"
 mkdir -p "$work"
 
@@ -50,17 +50,17 @@ trap cleanup EXIT
 
 # The same names dmg.sh puts in the image; the app can be an empty folder.
 root="$work/root"
-mkdir -p "$root/Clawdmeter.app" "$root/.background"
+mkdir -p "$root/ClawdBuddy.app" "$root/.background"
 ln -s /Applications "$root/Applications"
 tiffutil -cathidpicheck "$here/macos/dmg-background.png" \
   "$here/macos/dmg-background@2x.png" -out "$root/.background/background.tiff"
-hdiutil create -quiet -volname Clawdmeter -srcfolder "$root" -fs HFS+ \
+hdiutil create -quiet -volname ClawdBuddy -srcfolder "$root" -fs HFS+ \
   -format UDRW "$work/layout.dmg"
 hdiutil attach "$work/layout.dmg" -noautoopen -quiet
 
 osascript <<SCRIPT
 tell application "Finder"
-  tell disk "Clawdmeter"
+  tell disk "ClawdBuddy"
     open
     set w to container window
     set current view of w to icon view
@@ -72,7 +72,7 @@ tell application "Finder"
     set icon size of o to 128
     set text size of o to 13
     set background picture of o to file ".background:background.tiff"
-    set position of item "Clawdmeter.app" to {$app_x, $icon_y}
+    set position of item "ClawdBuddy.app" to {$app_x, $icon_y}
     set position of item "Applications" to {$applications_x, $icon_y}
     close
     open

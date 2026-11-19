@@ -1,5 +1,5 @@
 {
-  description = "Clawdmeter: desk-side Claude Code usage monitor (desktop app + firmware dev shell)";
+  description = "ClawdBuddy: desk-side Claude Code usage monitor (desktop app + firmware dev shell)";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
@@ -41,8 +41,8 @@
           cargoToml = lib.importTOML ./desktop/Cargo.toml;
         in
         rec {
-          clawdmeter = pkgs.rustPlatform.buildRustPackage {
-            pname = "clawdmeter";
+          clawdbuddy = pkgs.rustPlatform.buildRustPackage {
+            pname = "clawdbuddy";
             version = cargoToml.workspace.package.version;
 
             # build.rs reads Clawd's art from the firmware's generated header.
@@ -65,7 +65,7 @@
             cargoLock.lockFile = ./desktop/Cargo.lock;
             cargoBuildFlags = [
               "-p"
-              "clawdmeter-app"
+              "clawdbuddy-app"
             ];
             # The workspace tests run in CI; GPUI's need a display.
             doCheck = false;
@@ -77,46 +77,46 @@
             buildInputs = linkLibs pkgs;
 
             postInstall = ''
-              install -Dm644 tools/packaging/linux/clawdmeter.desktop -t $out/share/applications
+              install -Dm644 tools/packaging/linux/clawdbuddy.desktop -t $out/share/applications
               for s in 16 24 32 48 64 128 256 512; do
-                install -Dm644 tools/packaging/icons/clawdmeter-$s.png \
-                  $out/share/icons/hicolor/''${s}x$s/apps/clawdmeter.png
+                install -Dm644 tools/packaging/icons/clawdbuddy-$s.png \
+                  $out/share/icons/hicolor/''${s}x$s/apps/clawdbuddy.png
               done
             '';
 
             # rpath, not a wrapper: the app writes its own path into Claude
             # Code's hooks and the autostart entry, and a wrapper's
-            # `.clawdmeter-wrapped` would run there without the environment.
+            # `.clawdbuddy-wrapped` would run there without the environment.
             # Runs after the fixup's rpath shrinking, which would drop
             # libraries that are only dlopen()ed.
             postFixup = ''
               patchelf --add-rpath ${lib.makeLibraryPath (runtimeLibs pkgs ++ linkLibs pkgs)} \
-                $out/bin/clawdmeter
+                $out/bin/clawdbuddy
             '';
 
             meta = {
-              description = "Desktop companion for the Clawdmeter Claude Code usage monitor";
-              homepage = "https://github.com/HermannBjorgvin/Clawdmeter";
+              description = "Desktop companion for the ClawdBuddy Claude Code usage monitor";
+              homepage = "https://github.com/tfranovic/ClawdBuddy";
               license = lib.licenses.mit;
-              mainProgram = "clawdmeter";
+              mainProgram = "clawdbuddy";
               platforms = systems;
             };
           };
-          default = clawdmeter;
+          default = clawdbuddy;
         }
       );
 
       apps = forAllSystems (pkgs: {
         default = {
           type = "app";
-          program = "${self.packages.${pkgs.stdenv.hostPlatform.system}.clawdmeter}/bin/clawdmeter";
-          meta.description = "Clawdmeter desktop app";
+          program = "${self.packages.${pkgs.stdenv.hostPlatform.system}.clawdbuddy}/bin/clawdbuddy";
+          meta.description = "ClawdBuddy desktop app";
         };
       });
 
       devShells = forAllSystems (pkgs: {
         default = pkgs.mkShell {
-          inputsFrom = [ self.packages.${pkgs.stdenv.hostPlatform.system}.clawdmeter ];
+          inputsFrom = [ self.packages.${pkgs.stdenv.hostPlatform.system}.clawdbuddy ];
           packages = with pkgs; [
             clippy
             rustfmt

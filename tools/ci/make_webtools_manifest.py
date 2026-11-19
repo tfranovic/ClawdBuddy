@@ -12,7 +12,7 @@ padding, and an update that wrote it would unpair the board. So the image is
 split around NVS into <env>-<version>.part<N>.bin files, one part each; an
 image with no partition table ships whole at offset 0:
 
-    {"name": "Clawdmeter — <display name>", "version": "v1.9.0",
+    {"name": "ClawdBuddy — <display name>", "version": "v1.9.0",
      "new_install_prompt_erase": true,
      "builds": [{"chipFamily": "ESP32-S3",
                  "parts": [{"path": "<env>-v1.9.0.part0.bin", "offset": 0},
@@ -35,7 +35,7 @@ PARTITION_TABLE = 0x8000
 def preserved_ranges(image: bytes) -> list[tuple[int, int]]:
     """NVS and NVS-keys partitions, as (start, end), from the image's own table.
 
-    Mirrors clawdmeter-flash's device::preserved_ranges."""
+    Mirrors clawdbuddy-flash's device::preserved_ranges."""
     out = []
     table = image[PARTITION_TABLE:PARTITION_TABLE + 0xC00]
     for i in range(0, len(table) - 31, 32):
@@ -103,7 +103,7 @@ def main() -> int:
             print(f"error: no ESP Web Tools family for chip {board['chip']}", file=sys.stderr)
             return 1
         web = {
-            "name": f"Clawdmeter — {board['display_name']}",
+            "name": f"ClawdBuddy — {board['display_name']}",
             "version": manifest["version"],
             "new_install_prompt_erase": True,
             "builds": [{

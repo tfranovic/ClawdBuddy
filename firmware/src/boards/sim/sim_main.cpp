@@ -8,7 +8,7 @@
 
 int main(void) {
     printf(
-        "Clawdmeter simulator\n"
+        "ClawdBuddy simulator\n"
         "  mouse          touch (on the meters he reacts; elsewhere: show me the meters)\n"
         "  space          play/pause scenario    left/right step    1-9 jump\n"
         "  d              toggle BLE link\n"

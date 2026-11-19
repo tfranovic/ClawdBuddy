@@ -1,0 +1,1409 @@
+//! The `key = value` config file, shared with the settings window (and with
+//! the bash / Python daemons it replaces, so an existing file keeps working).
+//!
+//! Reading matches those daemons: `#` starts a comment, whitespace and CR are
+//! trimmed, keys compare case-insensitively, and the last occurrence of a key
+//! wins. Writing edits
+//! the file line by line so comments, blank lines, unknown keys and their
+//! order survive a round trip through the GUI.
+
+use std::fs;
+use std::io;
+use std::path::{Path, PathBuf};
+
+pub use crate::buttons::{Button, ButtonAction};
+use crate::paths::Paths;
+use crate::platform::Appearance;
+use crate::themes::{self, FollowTheme, ThemePreset};
+
+/// Default seconds between `/usage` polls while a session is working
+/// (`cadence::Cadence::default().working`).
+pub const DEFAULT_POLL_INTERVAL: u64 = 180;
+/// Default seconds between heartbeat replays.
+pub const DEFAULT_HEARTBEAT_INTERVAL: u64 = 60;
+/// Smallest accepted poll / heartbeat interval.
+pub const MIN_INTERVAL: u64 = 10;
+/// GitHub repo the flasher reads releases from.
+pub const DEFAULT_RELEASE_REPO: &str = "tfranovic/ClawdBuddy";
+/// How lively Clawd is on the device, 1 (No-nonsense) to 5 (All-nonsense).
+pub const LIVELINESS_MIN: u8 = 1;
+/// See [`LIVELINESS_MIN`].
+pub const LIVELINESS_MAX: u8 = 5;
+/// Some-nonsense: the director's own timings.
+pub const DEFAULT_LIVELINESS: u8 = 3;
+
+/// A config file held as its original lines.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ConfigFile {
+    lines: Vec<String>,
+    trailing_newline: bool,
+}
+
+/// Split one line into (key, value) when it is an active assignment.
+fn split_assignment(line: &str) -> Option<(&str, &str)> {
+    let line = line.trim_end_matches('\r');
+    let code = match line.find('#') {
+        Some(i) => &line[..i],
+        None => line,
+    };
+    let (k, v) = code.split_once('=')?;
+    let k = k.trim();
+    if k.is_empty() || k.contains(char::is_whitespace) {
+        return None;
+    }
+    Some((k, v.trim()))
+}
+
+impl ConfigFile {
+    /// Parse file contents. Never fails: unparseable lines are kept verbatim.
+    pub fn parse(text: &str) -> Self {
+        let trailing_newline = text.ends_with('\n');
+        let body = text.strip_suffix('\n').unwrap_or(text);
+        let lines = if text.is_empty() { Vec::new() } else { body.split('\n').map(str::to_owned).collect() };
+        ConfigFile { lines, trailing_newline: trailing_newline || text.is_empty() }
+    }
+
+    /// Load from disk; a missing file is an empty config.
+    pub fn load(path: &Path) -> io::Result<Self> {
+        match fs::read_to_string(path) {
+            Ok(t) => Ok(Self::parse(&t)),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(Self::default()),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Write atomically (temp file + rename), creating the parent dir.
+    pub fn save(&self, path: &Path) -> io::Result<()> {
+        if let Some(dir) = path.parent() {
+            fs::create_dir_all(dir)?;
+        }
+        let tmp: PathBuf = path.with_extension("tmp");
+        fs::write(&tmp, self.render())?;
+        fs::rename(&tmp, path)
+    }
+
+    /// The file contents.
+    pub fn render(&self) -> String {
+        let mut s = self.lines.join("\n");
+        if self.trailing_newline && !self.lines.is_empty() {
+            s.push('\n');
+        }
+        s
+    }
+
+    /// The value of `key` (last occurrence wins), comment and whitespace stripped.
+    pub fn get(&self, key: &str) -> Option<&str> {
+        self.lines
+            .iter()
+            .rev()
+            .filter_map(|l| split_assignment(l))
+            .find(|(k, _)| k.eq_ignore_ascii_case(key))
+            .map(|(_, v)| v)
+    }
+
+    /// Set `key`. Rewrites the last active line for it in place (keeping its
+    /// indentation and trailing comment); otherwise inserts after a commented
+    /// example (`# key = ...`) if there is one, or appends.
+    pub fn set(&mut self, key: &str, value: &str) {
+        let active =
+            self.lines.iter().rposition(|l| split_assignment(l).is_some_and(|(k, _)| k.eq_ignore_ascii_case(key)));
+        if let Some(i) = active {
+            let line = self.lines[i].trim_end_matches('\r').to_owned();
+            let cr = if self.lines[i].ends_with('\r') { "\r" } else { "" };
+            let indent: String = line.chars().take_while(|c| c.is_whitespace()).collect();
+            let comment = line.find('#').map(|j| line[j..].to_owned());
+            let mut new = format!("{indent}{key} = {value}");
+            if let Some(c) = comment {
+                new.push(' ');
+                new.push_str(&c);
+            }
+            new.push_str(cr);
+            self.lines[i] = new;
+            return;
+        }
+        let example = self.lines.iter().rposition(|l| {
+            let t = l.trim_start();
+            t.strip_prefix('#')
+                .and_then(|rest| split_assignment(rest.trim_start()))
+                .is_some_and(|(k, _)| k.eq_ignore_ascii_case(key))
+        });
+        let new = format!("{key} = {value}");
+        match example {
+            Some(i) => self.lines.insert(i + 1, new),
+            None => self.lines.push(new),
+        }
+        self.trailing_newline = true;
+    }
+
+    /// Remove every active line for `key`. Comments are left alone.
+    pub fn remove(&mut self, key: &str) {
+        self.lines.retain(|l| !split_assignment(l).is_some_and(|(k, _)| k.eq_ignore_ascii_case(key)));
+    }
+
+    /// All active `(key, value)` pairs in file order (duplicates included).
+    pub fn entries(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.lines.iter().filter_map(|l| split_assignment(l))
+    }
+}
+
+/// `clock` option: whether and how the device shows a wall clock.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ClockMode {
+    /// No clock; the device shows "Usage" (default).
+    #[default]
+    Off,
+    /// Show a clock, 12/24h from the locale.
+    Auto,
+    /// Forced 12-hour.
+    H12,
+    /// Forced 24-hour.
+    H24,
+}
+
+impl ClockMode {
+    /// Parse a config value; anything unknown is `Off`, like the daemons.
+    pub fn parse(v: &str) -> Self {
+        match v.trim().to_ascii_lowercase().as_str() {
+            "auto" => ClockMode::Auto,
+            "12" => ClockMode::H12,
+            "24" => ClockMode::H24,
+            _ => ClockMode::Off,
+        }
+    }
+
+    /// The config-file spelling.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ClockMode::Off => "off",
+            ClockMode::Auto => "auto",
+            ClockMode::H12 => "12",
+            ClockMode::H24 => "24",
+        }
+    }
+}
+
+/// `attention_anim`: how long Clawd points and waves on the device when
+/// Claude needs you. Only his animation: the alert itself is unchanged.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AttentionAnim {
+    /// The whole alert, 2 minutes (default).
+    #[default]
+    Min2,
+    /// 30 seconds.
+    S30,
+    /// 10 seconds.
+    S10,
+    /// No animation.
+    Off,
+}
+
+impl AttentionAnim {
+    /// Every option, in the order the Device page shows them.
+    pub const ALL: [AttentionAnim; 4] =
+        [AttentionAnim::Off, AttentionAnim::S10, AttentionAnim::S30, AttentionAnim::Min2];
+
+    /// Parse a config value; anything unknown is the default.
+    pub fn parse(v: &str) -> Self {
+        match v.trim().to_ascii_lowercase().as_str() {
+            "30s" => AttentionAnim::S30,
+            "10s" => AttentionAnim::S10,
+            "off" => AttentionAnim::Off,
+            _ => AttentionAnim::Min2,
+        }
+    }
+
+    /// The config-file spelling, also the Device page's label.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            AttentionAnim::Min2 => "2m",
+            AttentionAnim::S30 => "30s",
+            AttentionAnim::S10 => "10s",
+            AttentionAnim::Off => "off",
+        }
+    }
+
+    /// The payload's `aa`: seconds, 0 = off.
+    pub fn seconds(self) -> u16 {
+        match self {
+            AttentionAnim::Min2 => 120,
+            AttentionAnim::S30 => 30,
+            AttentionAnim::S10 => 10,
+            AttentionAnim::Off => 0,
+        }
+    }
+}
+
+/// One of the device's UI colours: the eleven the payload's `th` carries, in
+/// its order (`firmware/src/theme_palette.h`), then the Fable overlay's,
+/// which goes out on its own as `fc` so `th` stays the length older firmware
+/// accepts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ColorToken {
+    /// Screen background.
+    Bg,
+    /// Card fill.
+    Panel,
+    /// Primary text.
+    Text,
+    /// Secondary text.
+    Dim,
+    /// Status line and pairing notes.
+    Accent,
+    /// Bars under 50 % (or on pace).
+    Green,
+    /// Bars at 50-80 % (or ahead of pace).
+    Amber,
+    /// Bars at 80 %+ (or at the limit).
+    Red,
+    /// Unfilled bar track and the pills.
+    BarBg,
+    /// Clawd: the sprite's body and the screensaver face.
+    Clawd,
+    /// The screensaver face's eyes.
+    Eye,
+    /// The Fable overlay in the weekly bar (`fc`, not part of `th`).
+    Fable,
+}
+
+impl ColorToken {
+    /// Every token: `th`'s eleven in order, then Fable (also the Device
+    /// page's order).
+    pub const ALL: [ColorToken; 12] = [
+        ColorToken::Bg,
+        ColorToken::Panel,
+        ColorToken::Text,
+        ColorToken::Dim,
+        ColorToken::Accent,
+        ColorToken::Green,
+        ColorToken::Amber,
+        ColorToken::Red,
+        ColorToken::BarBg,
+        ColorToken::Clawd,
+        ColorToken::Eye,
+        ColorToken::Fable,
+    ];
+
+    /// The tokens `th` carries.
+    pub const TH: [ColorToken; 11] = [
+        ColorToken::Bg,
+        ColorToken::Panel,
+        ColorToken::Text,
+        ColorToken::Dim,
+        ColorToken::Accent,
+        ColorToken::Green,
+        ColorToken::Amber,
+        ColorToken::Red,
+        ColorToken::BarBg,
+        ColorToken::Clawd,
+        ColorToken::Eye,
+    ];
+
+    /// The config key, `color_<name>`.
+    pub fn key(self) -> &'static str {
+        match self {
+            ColorToken::Bg => "color_bg",
+            ColorToken::Panel => "color_panel",
+            ColorToken::Text => "color_text",
+            ColorToken::Dim => "color_dim",
+            ColorToken::Accent => "color_accent",
+            ColorToken::Green => "color_green",
+            ColorToken::Amber => "color_amber",
+            ColorToken::Red => "color_red",
+            ColorToken::BarBg => "color_bar_bg",
+            ColorToken::Clawd => "color_clawd",
+            ColorToken::Eye => "color_eye",
+            ColorToken::Fable => "color_fable",
+        }
+    }
+
+    /// The Device page's name for it.
+    pub fn label(self) -> &'static str {
+        match self {
+            ColorToken::Bg => "Background",
+            ColorToken::Panel => "Cards",
+            ColorToken::Text => "Text",
+            ColorToken::Dim => "Secondary text",
+            ColorToken::Accent => "Accent",
+            ColorToken::Green => "Low usage",
+            ColorToken::Amber => "Medium usage",
+            ColorToken::Red => "High usage",
+            ColorToken::BarBg => "Bar track",
+            ColorToken::Clawd => "Clawd",
+            ColorToken::Eye => "Face eyes",
+            ColorToken::Fable => "Fable",
+        }
+    }
+
+    /// The firmware's default, 0xRRGGBB.
+    pub fn default_rgb(self) -> u32 {
+        Palette::default().get(self)
+    }
+
+    /// Its place in [`Palette`] (and `th`): the variants are declared in
+    /// [`Self::ALL`]'s order.
+    fn index(self) -> usize {
+        self as usize
+    }
+}
+
+/// The device's colours (`color_*` keys): [`ColorToken::TH`]'s eleven are
+/// sent as `th`, Fable's as `fc`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Palette([u32; 12]);
+
+impl Default for Palette {
+    fn default() -> Self {
+        themes::default_preset().colors
+    }
+}
+
+impl Palette {
+    /// From twelve 0xRRGGBB colours in [`ColorToken::ALL`] order.
+    pub const fn new(colors: [u32; 12]) -> Self {
+        Palette(colors)
+    }
+
+    /// 0xRRGGBB for `t`.
+    pub fn get(&self, t: ColorToken) -> u32 {
+        self.0[t.index()]
+    }
+
+    /// Set `t` to 0xRRGGBB (masked to 24 bits).
+    pub fn set(&mut self, t: ColorToken, rgb: u32) {
+        self.0[t.index()] = rgb & 0xff_ffff;
+    }
+
+    /// The payload's `th`: [`ColorToken::TH`]'s colours as 6 lower-case hex
+    /// digits each, run together (66 digits; Fable's isn't one of them).
+    pub fn to_hex(&self) -> String {
+        ColorToken::TH.iter().map(|&t| format!("{:06x}", self.get(t))).collect()
+    }
+
+    /// The payload's `fc`: Fable's colour.
+    pub fn fable(&self) -> Rgb {
+        Rgb(self.get(ColorToken::Fable))
+    }
+}
+
+/// Serialized as `th` ([`Palette::to_hex`]).
+impl serde::Serialize for Palette {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.to_hex())
+    }
+}
+
+/// One 0xRRGGBB colour, serialized as six lower-case hex digits (`fc`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Rgb(pub u32);
+
+impl serde::Serialize for Rgb {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&format!("{:06x}", self.0 & 0xff_ffff))
+    }
+}
+
+/// A `color_*` value: six hex digits, `rrggbb`, no `#` (that starts a
+/// comment in the config file).
+pub fn parse_rgb(v: &str) -> Option<u32> {
+    let h = v.trim();
+    if h.len() == 6 && h.bytes().all(|b| b.is_ascii_hexdigit()) {
+        u32::from_str_radix(h, 16).ok()
+    } else {
+        None
+    }
+}
+
+/// The device's colours: `theme = system` (the default) or another theme
+/// that follows the OS, a preset (`theme = <id>`) or `theme = custom`, which
+/// uses the `color_*` keys.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeviceTheme {
+    /// One of [`crate::themes::FOLLOWING`]: two presets, picked by the OS's
+    /// appearance.
+    Follow(&'static FollowTheme),
+    /// One of [`crate::themes::PRESETS`].
+    Preset(&'static ThemePreset),
+    /// [`Settings::custom_colors`].
+    Custom,
+}
+
+/// System.
+impl Default for DeviceTheme {
+    fn default() -> Self {
+        DeviceTheme::Follow(&themes::SYSTEM)
+    }
+}
+
+impl DeviceTheme {
+    /// `theme`: `system`, `solarized`, a preset id or `custom`. `clawd`, the
+    /// default before there was a System theme, and anything unknown are
+    /// System.
+    pub fn parse(v: &str) -> Self {
+        let v = v.trim();
+        if v.eq_ignore_ascii_case("custom") {
+            DeviceTheme::Custom
+        } else if let Some(f) = themes::find_following(v) {
+            DeviceTheme::Follow(f)
+        } else {
+            themes::find(v).map(DeviceTheme::Preset).unwrap_or_default()
+        }
+    }
+
+    /// The `theme` value.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            DeviceTheme::Follow(f) => f.id,
+            DeviceTheme::Preset(p) => p.id,
+            DeviceTheme::Custom => "custom",
+        }
+    }
+}
+
+/// Typed view of the config, with the old daemons' defaults and clamps.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Settings {
+    /// Claude config dirs to poll (accounts). Default `[~/.claude]`.
+    pub config_dirs: Vec<PathBuf>,
+    /// Codex homes to poll (accounts, a trial: [`crate::codex`]). With no
+    /// `codex_dirs` key, the default Codex home when it has a sign-in
+    /// ([`Settings::load`]); an empty key is none.
+    pub codex_dirs: Vec<PathBuf>,
+    /// The default Codex home found at load (`$CODEX_HOME` or `~/.codex`
+    /// with an `auth.json`): what no `codex_dirs` key means, so saving an
+    /// unchanged list doesn't pin it into the file.
+    pub codex_default: Option<PathBuf>,
+    /// `/usage` poll interval while a session is working (s, >= 10).
+    pub poll_interval: u64,
+    /// True when `poll_interval` came from the file or the env var, in which
+    /// case it also replaces the 2-minute no-hooks cadence.
+    pub poll_interval_explicit: bool,
+    /// Heartbeat replay interval (s, >= 10).
+    pub heartbeat_interval: u64,
+    /// The device chimes when the session window resets (`c`;
+    /// `reset_chime`, formerly `chime`).
+    pub reset_chime: bool,
+    /// The device chimes for an attention alert (`b`; `alert_chime`,
+    /// formerly `beep`).
+    pub alert_chime: bool,
+    /// This computer chimes for an attention alert (`desktop_chime`).
+    pub desktop_chime: bool,
+    /// Wall clock on the device (`t`/`tf`).
+    pub clock: ClockMode,
+    /// `owner/repo` for firmware releases.
+    pub release_repo: String,
+    /// Explicit path to the `claude` CLI, if the user set one.
+    pub claude_path: Option<PathBuf>,
+    /// Daily firmware update check (default on).
+    pub update_check: bool,
+    /// The app release the user chose not to be told about (`skipped_update`,
+    /// a tag like `v2.5.0`); a later release is announced again.
+    pub skipped_update: Option<String>,
+    /// The firmware release the user chose not to be nudged about on the
+    /// Overview (`skipped_firmware`, a tag); a later release nudges again.
+    pub skipped_firmware: Option<String>,
+    /// Which kinds of "Claude needs you" alert reach the device and tray.
+    pub alert_on: AlertOn,
+    /// Name the waiting session's project in the device's alert line
+    /// (`alert_project`, default on): `Permission: my-project` in place of
+    /// `Permission needed!`.
+    pub alert_project: bool,
+    /// How lively Clawd is on the device (`lv`, 1-5, default 3).
+    pub liveliness: u8,
+    /// How long Clawd points and waves for an alert (`aa`, default 2m).
+    pub attention_anim: AttentionAnim,
+    /// Pace marker on the device's usage bars (`pm`, default off).
+    pub pace_marker: bool,
+    /// The agent team view on the device (`tv`, default off): sessions as
+    /// desks in an office, a side tap away from the meters.
+    pub team_view: bool,
+    /// The main meter's percentage beside the macOS menu bar icon
+    /// (`menu_bar_usage`, default off).
+    pub menu_bar_usage: bool,
+    /// What the device's primary, secondary and PWR buttons do, by
+    /// [`Button::index`] (`button_primary`, `button_secondary`, `button_pwr`;
+    /// sent as `k1`, `k2`, `k3`).
+    pub buttons: [ButtonAction; 3],
+    /// Which colours the device uses (`theme`); [`Settings::colors`] is
+    /// the palette it gets as `th`, given the OS's appearance.
+    pub theme: DeviceTheme,
+    /// The custom theme's colours (`color_*`), kept while a preset is chosen;
+    /// `None` until it has any.
+    pub custom_colors: Option<Palette>,
+}
+
+/// `alert_on`: the alert kinds that show, as a comma list of `permission`,
+/// `question`, `idle`, `elicitation` (`none` for no alerts). Default: all
+/// but `idle`. Other notification types follow `permission`, and so does a
+/// turn that ended on a usage limit or an API error.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AlertOn {
+    /// Permission requests (and unrecognised notification types).
+    pub permission: bool,
+    /// AskUserQuestion.
+    pub question: bool,
+    /// The prompt waiting for input.
+    pub idle: bool,
+    /// MCP input requests.
+    pub elicitation: bool,
+}
+
+impl Default for AlertOn {
+    fn default() -> Self {
+        AlertOn { permission: true, question: true, idle: false, elicitation: true }
+    }
+}
+
+impl AlertOn {
+    /// Parse the comma list; unknown words are ignored.
+    pub fn parse(v: &str) -> Self {
+        let mut a = AlertOn { permission: false, question: false, idle: false, elicitation: false };
+        for w in v.split(',').map(|w| w.trim().to_ascii_lowercase()) {
+            match w.as_str() {
+                "permission" => a.permission = true,
+                "question" => a.question = true,
+                "idle" => a.idle = true,
+                "elicitation" => a.elicitation = true,
+                _ => {}
+            }
+        }
+        a
+    }
+
+    /// The comma list ([`AlertOn::parse`] reads it back).
+    pub fn as_config(&self) -> String {
+        let on: Vec<&str> = [
+            (self.permission, "permission"),
+            (self.question, "question"),
+            (self.idle, "idle"),
+            (self.elicitation, "elicitation"),
+        ]
+        .into_iter()
+        .filter_map(|(on, w)| on.then_some(w))
+        .collect();
+        if on.is_empty() {
+            "none".into()
+        } else {
+            on.join(", ")
+        }
+    }
+
+    /// Whether an alert of `kind` shows.
+    pub fn allows(&self, kind: crate::attention::AlertKind) -> bool {
+        use crate::attention::AlertKind as K;
+        match kind {
+            K::Permission | K::Other | K::Limit | K::Failed => self.permission,
+            K::Question => self.question,
+            K::Idle => self.idle,
+            K::Elicitation => self.elicitation,
+        }
+    }
+}
+
+/// Parse `liveliness`: a whole number, clamped to 1-5; anything else is the
+/// default.
+pub fn parse_liveliness(v: &str) -> u8 {
+    match v.trim().parse::<i64>() {
+        Ok(n) => n.clamp(LIVELINESS_MIN as i64, LIVELINESS_MAX as i64) as u8,
+        Err(_) => DEFAULT_LIVELINESS,
+    }
+}
+
+/// Parse an interval like the bash daemon: digits only, clamped to >= 10.
+pub fn parse_interval(v: &str) -> Option<u64> {
+    let v = v.trim();
+    if v.is_empty() || !v.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    // All digits but too long for u64 is still "a big number".
+    Some(v.parse::<u64>().unwrap_or(u64::MAX).max(MIN_INTERVAL))
+}
+
+fn on_off(v: Option<&str>, default: bool) -> bool {
+    match v.map(|s| s.trim().to_ascii_lowercase()) {
+        Some(s) if s == "on" => true,
+        Some(s) if s == "off" => false,
+        Some(_) => false,
+        None => default,
+    }
+}
+
+impl Settings {
+    /// The palette the device gets (`th`): for System (Dark or Light) and
+    /// Solarized (its Dark or Light), the one the OS's `appearance` picks;
+    /// the chosen preset's; or the custom colours.
+    pub fn colors(&self, appearance: Appearance) -> Palette {
+        match self.theme {
+            DeviceTheme::Follow(f) => f.preset(appearance).colors,
+            DeviceTheme::Preset(p) => p.colors,
+            DeviceTheme::Custom => self.custom_colors.unwrap_or_default(),
+        }
+    }
+
+    /// Switch to the custom theme. The first time, it starts from the colours
+    /// on screen (a following theme's as `appearance` has it); after that it
+    /// keeps its own, even if they equal a preset's.
+    pub fn choose_custom(&mut self, appearance: Appearance) {
+        if self.custom_colors.is_none() {
+            self.custom_colors = Some(self.colors(appearance));
+        }
+        self.theme = DeviceTheme::Custom;
+    }
+
+    /// Build from a parsed file. `env_poll` is the `POLL_INTERVAL` env var,
+    /// which seeds the default the file overrides (bash daemon behaviour).
+    pub fn from_config(cfg: &ConfigFile, paths: &Paths, env_poll: Option<&str>) -> Self {
+        let env_default = env_poll.and_then(parse_interval);
+        let file_poll = cfg.get("poll_interval").and_then(parse_interval);
+        let poll_interval = file_poll.or(env_default).unwrap_or(DEFAULT_POLL_INTERVAL);
+        let heartbeat_interval =
+            cfg.get("heartbeat_interval").and_then(parse_interval).unwrap_or(DEFAULT_HEARTBEAT_INTERVAL);
+        Settings {
+            config_dirs: parse_config_dirs(cfg.get("config_dirs"), paths),
+            codex_dirs: {
+                // A folder listed as both is a Claude account.
+                let claude = parse_config_dirs(cfg.get("config_dirs"), paths);
+                let mut v = parse_dir_list(cfg.get("codex_dirs").unwrap_or(""), paths);
+                v.retain(|d| !claude.contains(d));
+                v
+            },
+            codex_default: None,
+            poll_interval,
+            poll_interval_explicit: file_poll.is_some() || env_default.is_some(),
+            heartbeat_interval,
+            // Only an explicit "on" enables (bash read_onoff_setting). The
+            // old `chime` / `beep` keys still count when the new ones are absent.
+            reset_chime: on_off(cfg.get("reset_chime").or_else(|| cfg.get("chime")), false),
+            alert_chime: on_off(cfg.get("alert_chime").or_else(|| cfg.get("beep")), false),
+            desktop_chime: on_off(cfg.get("desktop_chime"), false),
+            clock: cfg.get("clock").map(ClockMode::parse).unwrap_or_default(),
+            release_repo: cfg
+                .get("release_repo")
+                .filter(|s| s.split('/').count() == 2 && !s.starts_with('/') && !s.ends_with('/'))
+                .unwrap_or(DEFAULT_RELEASE_REPO)
+                .to_owned(),
+            claude_path: cfg.get("claude_path").filter(|s| !s.is_empty()).map(|s| paths.expand_tilde(s)),
+            update_check: on_off(cfg.get("update_check"), true),
+            skipped_update: cfg.get("skipped_update").filter(|s| !s.is_empty()).map(str::to_owned),
+            skipped_firmware: cfg.get("skipped_firmware").filter(|s| !s.is_empty()).map(str::to_owned),
+            alert_on: cfg.get("alert_on").map(AlertOn::parse).unwrap_or_default(),
+            alert_project: on_off(cfg.get("alert_project"), true),
+            liveliness: cfg.get("liveliness").map(parse_liveliness).unwrap_or(DEFAULT_LIVELINESS),
+            attention_anim: cfg.get("attention_anim").map(AttentionAnim::parse).unwrap_or_default(),
+            pace_marker: on_off(cfg.get("pace_marker"), false),
+            team_view: on_off(cfg.get("team_view"), false),
+            menu_bar_usage: on_off(cfg.get("menu_bar_usage"), false),
+            buttons: Button::ALL.map(|b| {
+                cfg.get(b.config_key()).map_or(b.default_action(), |v| ButtonAction::parse(v, b.default_action()))
+            }),
+            theme: cfg.get("theme").map(DeviceTheme::parse).unwrap_or_default(),
+            custom_colors: {
+                let mut p: Option<Palette> = None;
+                for t in ColorToken::ALL {
+                    if let Some(rgb) = cfg.get(t.key()).and_then(parse_rgb) {
+                        p.get_or_insert_default().set(t, rgb);
+                    }
+                }
+                p
+            },
+        }
+    }
+
+    /// Load the user's config file (missing file → defaults), with the
+    /// environment's `POLL_INTERVAL` and `CLAUDE_CONFIG_DIR` defaults.
+    pub fn load(paths: &Paths) -> io::Result<Self> {
+        let cfg = ConfigFile::load(&paths.config_file)?;
+        let env = std::env::var("POLL_INTERVAL").ok();
+        let mut s = Self::from_config(&cfg, paths, env.as_deref());
+        s.apply_env_config_dir(&cfg, paths, std::env::var("CLAUDE_CONFIG_DIR").ok().as_deref());
+        s.discover_codex(&cfg, paths, std::env::var("CODEX_HOME").ok().as_deref());
+        Ok(s)
+    }
+
+    /// [`Settings::apply_codex_default`] with the default Codex home found on
+    /// this machine (`codex_home` is `$CODEX_HOME`). Every path that loads
+    /// settings to save them again goes through this, so the default is
+    /// known when the list is edited.
+    pub fn discover_codex(&mut self, cfg: &ConfigFile, paths: &Paths, codex_home: Option<&str>) {
+        self.apply_codex_default(cfg, crate::codex::discover(&paths.home, codex_home));
+    }
+
+    /// The default Codex home (found by [`crate::codex::discover`]) is an
+    /// account unless the file lists Codex homes itself (`codex_dirs`, empty
+    /// for none). With no Codex home, nothing is polled and no Codex UI shows.
+    pub fn apply_codex_default(&mut self, cfg: &ConfigFile, found: Option<PathBuf>) {
+        self.codex_default = found;
+        if cfg.get("codex_dirs").is_none() {
+            self.codex_dirs = self.codex_default.iter().cloned().collect();
+        }
+        let claude = &self.config_dirs;
+        self.codex_dirs.retain(|d| !claude.contains(d));
+    }
+
+    /// With no `config_dirs` in the file, a `CLAUDE_CONFIG_DIR` in the
+    /// environment names the account to poll: it is the dir the user's own
+    /// `claude` uses (the Windows daemon read its token from there too).
+    /// Only the daemon applies this; the settings window shows and saves the
+    /// file's value, so saving never pins the env dir into the file.
+    pub fn apply_env_config_dir(&mut self, cfg: &ConfigFile, paths: &Paths, env_dir: Option<&str>) {
+        if cfg.get("config_dirs").is_some_and(|v| !v.trim().is_empty()) {
+            return;
+        }
+        if let Some(d) = env_dir.map(str::trim).filter(|d| !d.is_empty()) {
+            self.config_dirs = vec![paths.expand_tilde(d)];
+        }
+    }
+
+    /// Write these settings into `cfg`, touching only keys whose value differs
+    /// from what the file already says (so a hand-written `reset_chime = off` stays
+    /// as written and absent keys at their defaults stay absent).
+    pub fn apply_to(&self, cfg: &mut ConfigFile, paths: &Paths) {
+        let mut current = Settings::from_config(cfg, paths, None);
+        current.apply_codex_default(cfg, self.codex_default.clone());
+        let home = &paths.home;
+        let list = |dirs: &[PathBuf]| -> String {
+            dirs.iter()
+                .map(|d| match d.strip_prefix(home) {
+                    Ok(rest) if rest.as_os_str().is_empty() => "~".to_owned(),
+                    Ok(rest) => format!("~/{}", rest.to_string_lossy().replace('\\', "/")),
+                    Err(_) => d.to_string_lossy().into_owned(),
+                })
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        if current.config_dirs != self.config_dirs {
+            cfg.set("config_dirs", &list(&self.config_dirs));
+        }
+        // Only a change is written: the default Codex home stays implicit
+        // until the list is edited, and then `codex_dirs =` (empty) keeps a
+        // removed default from coming back.
+        if current.codex_dirs != self.codex_dirs {
+            cfg.set("codex_dirs", &list(&self.codex_dirs));
+        }
+        if current.poll_interval != self.poll_interval {
+            cfg.set("poll_interval", &self.poll_interval.to_string());
+        }
+        if current.heartbeat_interval != self.heartbeat_interval {
+            cfg.set("heartbeat_interval", &self.heartbeat_interval.to_string());
+        }
+        let oo = |b: bool| if b { "on" } else { "off" };
+        // A changed chime is written under its new name; the old one goes.
+        // The other switches ride along (they have no old name).
+        for (key, old, now, was) in [
+            ("reset_chime", "chime", self.reset_chime, current.reset_chime),
+            ("alert_chime", "beep", self.alert_chime, current.alert_chime),
+            ("desktop_chime", "", self.desktop_chime, current.desktop_chime),
+            ("pace_marker", "", self.pace_marker, current.pace_marker),
+            ("team_view", "", self.team_view, current.team_view),
+            ("alert_project", "", self.alert_project, current.alert_project),
+            ("menu_bar_usage", "", self.menu_bar_usage, current.menu_bar_usage),
+        ] {
+            if now != was {
+                cfg.set(key, oo(now));
+                if !old.is_empty() {
+                    cfg.remove(old);
+                }
+            }
+        }
+        if current.clock != self.clock {
+            cfg.set("clock", self.clock.as_str());
+        }
+        if current.release_repo != self.release_repo {
+            cfg.set("release_repo", &self.release_repo);
+        }
+        if current.claude_path != self.claude_path {
+            match &self.claude_path {
+                Some(p) => cfg.set("claude_path", &p.to_string_lossy()),
+                None => cfg.remove("claude_path"),
+            }
+        }
+        if current.update_check != self.update_check {
+            cfg.set("update_check", oo(self.update_check));
+        }
+        if current.skipped_update != self.skipped_update {
+            match &self.skipped_update {
+                Some(tag) => cfg.set("skipped_update", tag),
+                None => cfg.remove("skipped_update"),
+            }
+        }
+        if current.skipped_firmware != self.skipped_firmware {
+            match &self.skipped_firmware {
+                Some(tag) => cfg.set("skipped_firmware", tag),
+                None => cfg.remove("skipped_firmware"),
+            }
+        }
+        if current.alert_on != self.alert_on {
+            cfg.set("alert_on", &self.alert_on.as_config());
+        }
+        if current.liveliness != self.liveliness {
+            cfg.set("liveliness", &self.liveliness.to_string());
+        }
+        if current.attention_anim != self.attention_anim {
+            cfg.set("attention_anim", self.attention_anim.as_str());
+        }
+        for b in Button::ALL {
+            let a = self.buttons[b.index()];
+            if current.buttons[b.index()] != a {
+                cfg.set(b.config_key(), &a.as_str());
+            }
+        }
+        if current.theme != self.theme {
+            if self.theme == DeviceTheme::default() {
+                cfg.remove("theme");
+            } else {
+                cfg.set("theme", self.theme.as_str());
+            }
+        }
+        // All twelve, default or not: their presence is how a later run knows
+        // Custom has colours of its own (`choose_custom`).
+        if current.custom_colors != self.custom_colors {
+            for t in ColorToken::ALL {
+                match self.custom_colors {
+                    Some(p) => cfg.set(t.key(), &format!("{:06x}", p.get(t))),
+                    None => cfg.remove(t.key()),
+                }
+            }
+        }
+    }
+}
+
+/// A comma list of folders, `~` expanded, blanks dropped.
+pub fn parse_dir_list(raw: &str, paths: &Paths) -> Vec<PathBuf> {
+    raw.split(',').map(str::trim).filter(|s| !s.is_empty()).map(|s| paths.expand_tilde(s)).collect()
+}
+
+/// `config_dirs`: comma list, `~` expanded, blanks dropped; default `[~/.claude]`.
+pub fn parse_config_dirs(raw: Option<&str>, paths: &Paths) -> Vec<PathBuf> {
+    let dirs = parse_dir_list(raw.unwrap_or(""), paths);
+    if dirs.is_empty() {
+        vec![paths.home.join(".claude")]
+    } else {
+        dirs
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    const DARK: Appearance = Appearance::Dark;
+    const LIGHT: Appearance = Appearance::Light;
+
+    fn paths() -> Paths {
+        Paths::under(Path::new("/home/u"))
+    }
+
+    fn settings(text: &str) -> Settings {
+        Settings::from_config(&ConfigFile::parse(text), &paths(), None)
+    }
+
+    #[test]
+    fn alert_kinds_round_trip() {
+        use crate::attention::AlertKind;
+        let d = settings("").alert_on;
+        assert_eq!(d, AlertOn::default());
+        assert!(d.allows(AlertKind::Question) && !d.allows(AlertKind::Idle));
+        assert!(d.allows(AlertKind::Other), "unknown types follow permission");
+        let s = settings("alert_on = idle, Question\n").alert_on;
+        assert_eq!(s, AlertOn { permission: false, question: true, idle: true, elicitation: false });
+        assert!(!s.allows(AlertKind::Other));
+        assert_eq!(AlertOn::parse(&s.as_config()), s);
+        let none = settings("alert_on = none\n").alert_on;
+        assert_eq!(none.as_config(), "none");
+        assert_eq!(AlertOn::parse(&none.as_config()), none);
+
+        // Saving writes the key only when it differs from the file.
+        let mut cfg = ConfigFile::parse("# keep\n");
+        let mut s = Settings::from_config(&cfg, &paths(), None);
+        s.apply_to(&mut cfg, &paths());
+        assert!(cfg.get("alert_on").is_none(), "defaults stay out of the file");
+        s.alert_on.idle = true;
+        s.apply_to(&mut cfg, &paths());
+        assert_eq!(cfg.get("alert_on"), Some("permission, question, idle, elicitation"));
+    }
+
+    // Ported from the legacy daemon test test_bash_heartbeat.sh (interval parsing).
+    #[test]
+    fn intervals_like_bash() {
+        let s = settings("");
+        assert_eq!((s.poll_interval, s.heartbeat_interval), (180, 60));
+        assert!(!s.poll_interval_explicit);
+        let s = settings("poll_interval = 300\nheartbeat_interval = 45\n");
+        assert_eq!((s.poll_interval, s.heartbeat_interval), (300, 45));
+        assert!(s.poll_interval_explicit);
+        assert_eq!(settings("  poll_interval=120 # comment\r\n").poll_interval, 120);
+        let s = settings("poll_interval = 3\nheartbeat_interval = 0\n");
+        assert_eq!((s.poll_interval, s.heartbeat_interval), (10, 10));
+        assert_eq!(settings("poll_interval = abc\n").poll_interval, 180);
+        assert_eq!(settings("poll_interval = 30\npoll_interval = 90\n").poll_interval, 90);
+    }
+
+    #[test]
+    fn env_poll_interval_seeds_default() {
+        let cfg = ConfigFile::parse("");
+        let p = paths();
+        assert_eq!(Settings::from_config(&cfg, &p, Some("45")).poll_interval, 45);
+        assert_eq!(Settings::from_config(&cfg, &p, Some("1")).poll_interval, 10);
+        assert_eq!(Settings::from_config(&cfg, &p, Some("abc")).poll_interval, 180);
+        assert_eq!(Settings::from_config(&cfg, &p, Some("-5")).poll_interval, 180);
+        assert_eq!(Settings::from_config(&cfg, &p, Some("")).poll_interval, 180);
+        let file = ConfigFile::parse("poll_interval = 200\n");
+        assert_eq!(Settings::from_config(&file, &p, Some("45")).poll_interval, 200);
+    }
+
+    // Ported from the legacy daemon test test_macos_multidir.py (read_config_dirs).
+    #[test]
+    fn config_dirs() {
+        assert_eq!(settings("").config_dirs, vec![PathBuf::from("/home/u/.claude")]);
+        assert_eq!(settings("clock = auto\nchime = on\n").config_dirs, vec![PathBuf::from("/home/u/.claude")]);
+        assert_eq!(
+            settings("config_dirs = ~/.claude, ~/.claude-work  # two plans\n").config_dirs,
+            vec![PathBuf::from("/home/u/.claude"), PathBuf::from("/home/u/.claude-work")]
+        );
+        assert_eq!(settings("config_dirs = , ,\n").config_dirs, vec![PathBuf::from("/home/u/.claude")]);
+    }
+
+    // Codex accounts: the default Codex home with no key, the list once
+    // there is one (empty: none). With no Codex home, none at all.
+    #[test]
+    fn codex_dirs() {
+        let p = paths();
+        let codex = PathBuf::from("/home/u/.codex");
+        let load = |text: &str, found: Option<PathBuf>| {
+            let cfg = ConfigFile::parse(text);
+            let mut s = Settings::from_config(&cfg, &p, None);
+            s.apply_codex_default(&cfg, found);
+            s
+        };
+        assert_eq!(load("", None).codex_dirs, Vec::<PathBuf>::new(), "no Codex home: nothing");
+        assert_eq!(load("", Some(codex.clone())).codex_dirs, vec![codex.clone()]);
+        assert_eq!(load("codex_dirs =\n", Some(codex.clone())).codex_dirs, Vec::<PathBuf>::new(), "removed");
+        assert_eq!(
+            load("codex_dirs = ~/.codex, ~/codex-work\n", None).codex_dirs,
+            vec![codex.clone(), PathBuf::from("/home/u/codex-work")]
+        );
+        assert_eq!(
+            load("config_dirs = ~/.claude, ~/both\ncodex_dirs = ~/both, ~/.codex\n", None).codex_dirs,
+            vec![codex.clone()],
+            "listed as both: Claude"
+        );
+
+        // Saving unchanged settings leaves the default implicit.
+        let mut cfg = ConfigFile::parse("clock = auto\n");
+        let s = load("clock = auto\n", Some(codex.clone()));
+        s.apply_to(&mut cfg, &p);
+        assert_eq!(cfg.get("codex_dirs"), None);
+        // Removing it writes an empty list, so it stays removed.
+        let none = Settings { codex_dirs: Vec::new(), ..s.clone() };
+        none.apply_to(&mut cfg, &p);
+        assert_eq!(cfg.get("codex_dirs"), Some(""));
+        assert_eq!(load(&cfg.render(), Some(codex.clone())).codex_dirs, Vec::<PathBuf>::new());
+        // The window's save path: loaded with discovery, edited, saved.
+        let root = std::env::temp_dir().join(format!("cm-codex-save-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join(".codex")).unwrap();
+        std::fs::write(root.join(".codex/auth.json"), "{}").unwrap();
+        let rp = Paths::under(&root);
+        let save = |cfg: &mut ConfigFile, edit: &dyn Fn(&mut Settings)| {
+            let mut s = Settings::from_config(cfg, &rp, None);
+            s.discover_codex(cfg, &rp, None);
+            edit(&mut s);
+            s.apply_to(cfg, &rp);
+        };
+        let mut cfg = ConfigFile::default();
+        save(&mut cfg, &|s| s.codex_dirs.retain(|d| !d.ends_with(".codex")));
+        assert_eq!(cfg.get("codex_dirs"), Some(""), "removing the default sticks");
+        let mut cfg = ConfigFile::default();
+        save(&mut cfg, &|s| s.codex_dirs.push(PathBuf::from("/srv/codex")));
+        assert_eq!(cfg.get("codex_dirs"), Some("~/.codex, /srv/codex"), "adding one keeps the default");
+        let _ = std::fs::remove_dir_all(&root);
+        // Adding a second one lists both.
+        let mut cfg = ConfigFile::default();
+        let two = Settings { codex_dirs: vec![codex, PathBuf::from("/srv/codex")], ..s };
+        two.apply_to(&mut cfg, &p);
+        assert_eq!(cfg.get("codex_dirs"), Some("~/.codex, /srv/codex"));
+    }
+
+    // The Windows daemon read the token from $CLAUDE_CONFIG_DIR when set
+    // (test_windows_token.py::test_read_token_config_dir_override).
+    #[test]
+    fn env_config_dir_is_the_default_account() {
+        let p = paths();
+        let with_env = |text: &str, env: Option<&str>| {
+            let cfg = ConfigFile::parse(text);
+            let mut s = Settings::from_config(&cfg, &p, None);
+            s.apply_env_config_dir(&cfg, &p, env);
+            s.config_dirs
+        };
+        assert_eq!(with_env("", Some("~/.claude-work")), vec![PathBuf::from("/home/u/.claude-work")]);
+        assert_eq!(with_env("", Some("/abs/dir")), vec![PathBuf::from("/abs/dir")]);
+        assert_eq!(with_env("", Some("  ")), vec![PathBuf::from("/home/u/.claude")]);
+        assert_eq!(with_env("", None), vec![PathBuf::from("/home/u/.claude")]);
+        // The file wins.
+        assert_eq!(with_env("config_dirs = ~/.claude\n", Some("/abs/dir")), vec![PathBuf::from("/home/u/.claude")]);
+        assert_eq!(with_env("config_dirs =\n", Some("/abs/dir")), vec![PathBuf::from("/abs/dir")]);
+    }
+
+    #[test]
+    fn on_off_and_clock() {
+        let s = settings("chime = ON\nbeep = yes\nclock = 12\n");
+        assert!(s.reset_chime, "the old key still counts");
+        assert!(!s.alert_chime);
+        assert!(!s.desktop_chime, "off by default");
+        assert_eq!(s.clock, ClockMode::H12);
+        let s = settings("chime = on\nreset_chime = off\nbeep = on\ndesktop_chime = on\n");
+        assert!(!s.reset_chime, "the new key wins");
+        assert!(s.alert_chime && s.desktop_chime);
+        assert_eq!(settings("clock = weird").clock, ClockMode::Off);
+        assert!(settings("").update_check);
+        assert_eq!(settings("").skipped_update, None);
+        assert_eq!(settings("skipped_update = v2.5.0").skipped_update.as_deref(), Some("v2.5.0"));
+        assert_eq!(settings("").skipped_firmware, None);
+        assert_eq!(settings("skipped_firmware = v2.5.0").skipped_firmware.as_deref(), Some("v2.5.0"));
+        assert_eq!(settings("").release_repo, DEFAULT_RELEASE_REPO);
+        assert_eq!(settings("release_repo = me/fork").release_repo, "me/fork");
+        assert_eq!(settings("release_repo = nonsense").release_repo, DEFAULT_RELEASE_REPO);
+    }
+
+    #[test]
+    fn liveliness() {
+        assert_eq!(settings("").liveliness, DEFAULT_LIVELINESS);
+        assert_eq!(settings("liveliness = 5\n").liveliness, 5);
+        assert_eq!(settings("liveliness = 0\n").liveliness, 1, "clamped");
+        assert_eq!(settings("liveliness = 9\n").liveliness, 5, "clamped");
+        assert_eq!(settings("liveliness = lots\n").liveliness, DEFAULT_LIVELINESS);
+
+        let mut cfg = ConfigFile::parse("");
+        let mut s = Settings::from_config(&cfg, &paths(), None);
+        s.apply_to(&mut cfg, &paths());
+        assert!(cfg.get("liveliness").is_none(), "the default stays out of the file");
+        s.liveliness = 1;
+        s.apply_to(&mut cfg, &paths());
+        assert_eq!(cfg.get("liveliness"), Some("1"));
+        assert_eq!(Settings::from_config(&cfg, &paths(), None).liveliness, 1);
+    }
+
+    #[test]
+    fn button_actions() {
+        use crate::buttons::{KeyChord, MediaKey, MOD_CTRL, MOD_SHIFT};
+        let s = settings("");
+        assert_eq!(s.buttons, [ButtonAction::Space, ButtonAction::ShiftTab, ButtonAction::Brightness]);
+        let s = settings("button_primary = Enter\nbutton_secondary = none\nbutton_pwr = ctrl+shift+m hold\n");
+        let teams = KeyChord { mods: MOD_CTRL | MOD_SHIFT, usage: 0x10, hold: true };
+        assert_eq!(s.buttons, [ButtonAction::Enter, ButtonAction::None, ButtonAction::Chord(teams)]);
+        let s = settings("button_primary = bogus\nbutton_secondary = ctrl+\nbutton_pwr = shift+hyper\n");
+        assert_eq!(s.buttons, Button::ALL.map(Button::default_action), "unknown values read as the default");
+        let mut cfg = ConfigFile::default();
+        let mut s = settings("");
+        s.apply_to(&mut cfg, &paths());
+        assert!(cfg.get("button_primary").is_none(), "the default stays out of the file");
+        s.buttons = [ButtonAction::Escape, ButtonAction::Media(MediaKey::VolumeUp), ButtonAction::Chord(teams)];
+        s.apply_to(&mut cfg, &paths());
+        assert_eq!(cfg.get("button_primary"), Some("escape"));
+        assert_eq!(cfg.get("button_secondary"), Some("volume-up"));
+        assert_eq!(cfg.get("button_pwr"), Some("ctrl+shift+m hold"));
+        assert_eq!(Settings::from_config(&cfg, &paths(), None).buttons, s.buttons);
+    }
+
+    #[test]
+    fn attention_anim() {
+        assert_eq!(settings("").attention_anim, AttentionAnim::Min2);
+        assert_eq!(settings("attention_anim = 30s\n").attention_anim, AttentionAnim::S30);
+        assert_eq!(settings("attention_anim = 10S\n").attention_anim, AttentionAnim::S10);
+        assert_eq!(settings("attention_anim = off\n").attention_anim, AttentionAnim::Off);
+        assert_eq!(settings("attention_anim = forever\n").attention_anim, AttentionAnim::Min2);
+        let secs: Vec<u16> = AttentionAnim::ALL.iter().map(|a| a.seconds()).collect();
+        assert_eq!(secs, [0, 10, 30, 120]);
+        for a in AttentionAnim::ALL {
+            assert_eq!(AttentionAnim::parse(a.as_str()), a, "round trip");
+        }
+
+        let mut cfg = ConfigFile::parse("");
+        let mut s = Settings::from_config(&cfg, &paths(), None);
+        s.apply_to(&mut cfg, &paths());
+        assert!(cfg.get("attention_anim").is_none(), "the default stays out of the file");
+        s.attention_anim = AttentionAnim::Off;
+        s.apply_to(&mut cfg, &paths());
+        assert_eq!(cfg.get("attention_anim"), Some("off"));
+        assert_eq!(Settings::from_config(&cfg, &paths(), None).attention_anim, AttentionAnim::Off);
+    }
+
+    #[test]
+    fn colors_round_trip() {
+        let d = settings("");
+        assert_eq!((d.theme, d.colors(DARK)), (DeviceTheme::default(), Palette::default()));
+        assert_eq!(d.theme.as_str(), "system");
+        assert_eq!(&d.colors(DARK).to_hex()[24..30], "d97757", "accent defaults to terra-cotta");
+        assert_eq!(d.colors(DARK).to_hex().len(), 66);
+        let s = settings("theme = custom\ncolor_accent = 647D99\ncolor_clawd = 112233  # mine\ncolor_red = nope\n");
+        assert_eq!(s.theme, DeviceTheme::Custom);
+        assert_eq!(s.colors(DARK).get(ColorToken::Accent), 0x647d99);
+        assert_eq!(s.colors(LIGHT).get(ColorToken::Clawd), 0x112233, "Custom ignores the OS");
+        assert_eq!(s.colors(DARK).get(ColorToken::Red), ColorToken::Red.default_rgb(), "bad values keep the default");
+
+        let mut cfg = ConfigFile::parse("");
+        let mut s = settings("");
+        s.theme = DeviceTheme::Custom;
+        s.custom_colors.get_or_insert_default().set(ColorToken::Accent, 0x647d99);
+        s.apply_to(&mut cfg, &paths());
+        assert_eq!((cfg.get("theme"), cfg.get("color_accent")), (Some("custom"), Some("647d99")));
+        assert_eq!(cfg.get("color_bg"), Some("000000"), "all twelve are written");
+        assert_eq!(cfg.get("color_fable"), Some("9775c7"));
+        s.custom_colors.get_or_insert_default().set(ColorToken::Accent, ColorToken::Accent.default_rgb());
+        s.apply_to(&mut cfg, &paths());
+        assert_eq!(cfg.get("color_accent"), Some("d97757"), "a default stays, as Custom's own");
+        assert_eq!(Settings::from_config(&cfg, &paths(), None).custom_colors, Some(Palette::default()));
+    }
+
+    #[test]
+    fn tokens_are_declared_in_th_order() {
+        for (i, t) in ColorToken::ALL.into_iter().enumerate() {
+            assert_eq!(t.index(), i, "{t:?}");
+        }
+        assert_eq!(ColorToken::TH, ColorToken::ALL[..11], "th is the first eleven");
+    }
+
+    #[test]
+    fn fable_colour_is_its_own_key() {
+        // A custom theme saved before color_fable starts it at the default.
+        let s = settings("theme = custom\ncolor_accent = 647d99\n");
+        assert_eq!(s.colors(DARK).get(ColorToken::Fable), ColorToken::Fable.default_rgb());
+        let s = settings("theme = custom\ncolor_fable = 112233\n");
+        let p = s.colors(DARK);
+        assert_eq!((p.get(ColorToken::Fable), p.to_hex().len()), (0x112233, 66), "th doesn't carry it");
+        assert_eq!(serde_json::to_string(&p.fable()).unwrap(), r#""112233""#);
+    }
+
+    #[test]
+    fn custom_starts_from_the_theme_on_screen_only_the_first_time() {
+        let dracula = crate::themes::find("dracula").unwrap();
+        let mut cfg = ConfigFile::parse("theme = dracula\n");
+        let reload = |cfg: &ConfigFile| Settings::from_config(cfg, &paths(), None);
+
+        let mut s = reload(&cfg);
+        assert_eq!(s.custom_colors, None, "never customised");
+        s.choose_custom(LIGHT);
+        assert_eq!((s.theme, s.custom_colors), (DeviceTheme::Custom, Some(dracula.colors)));
+        s.apply_to(&mut cfg, &paths());
+
+        // Reset all colors, on to a preset, and back: the reset is what's kept.
+        let mut s = reload(&cfg);
+        s.custom_colors = Some(Palette::default());
+        s.apply_to(&mut cfg, &paths());
+        let mut s = reload(&cfg);
+        s.theme = DeviceTheme::Preset(dracula);
+        s.apply_to(&mut cfg, &paths());
+        let mut s = reload(&cfg);
+        s.choose_custom(DARK);
+        assert_eq!(s.custom_colors, Some(Palette::default()));
+
+        // The same from Dark, whose colours are the defaults.
+        let mut cfg = ConfigFile::parse(
+            "theme = dark
+",
+        );
+        let mut s = reload(&cfg);
+        s.choose_custom(LIGHT);
+        s.apply_to(&mut cfg, &paths());
+        let mut s = reload(&cfg);
+        s.theme = DeviceTheme::Preset(dracula);
+        s.apply_to(&mut cfg, &paths());
+        let mut s = reload(&cfg);
+        s.choose_custom(DARK);
+        assert_eq!(s.custom_colors, Some(Palette::default()), "not Dracula's");
+
+        // From System: whichever of Dark and Light is on screen.
+        let mut s = reload(&ConfigFile::parse(""));
+        s.choose_custom(LIGHT);
+        assert_eq!(s.custom_colors, Some(crate::themes::light().colors));
+
+        // From Solarized: whichever of its Dark and Light is on screen.
+        let mut s = reload(&ConfigFile::parse("theme = solarized\n"));
+        s.choose_custom(LIGHT);
+        assert_eq!(s.custom_colors, Some(crate::themes::find("solarized_light").unwrap().colors));
+        let mut s = reload(&ConfigFile::parse("theme = solarized\n"));
+        s.choose_custom(DARK);
+        assert_eq!(s.custom_colors, Some(crate::themes::find("solarized_dark").unwrap().colors));
+    }
+
+    #[test]
+    fn a_preset_keeps_the_custom_colours_for_later() {
+        let s = settings("theme = Nord\ncolor_accent = 647d99\n");
+        let nord = crate::themes::find("nord").unwrap();
+        assert_eq!(s.theme, DeviceTheme::Preset(nord));
+        assert_eq!(s.colors(LIGHT), nord.colors, "a preset's own colours, not the custom ones");
+        assert_eq!(s.custom_colors.unwrap().get(ColorToken::Accent), 0x647d99, "kept for Custom");
+        assert_eq!(settings("theme = nope\n").theme, DeviceTheme::default(), "unknown: the default");
+
+        let mut cfg = ConfigFile::parse("theme = nord\ncolor_accent = 647d99\n");
+        let mut s = Settings::from_config(&cfg, &paths(), None);
+        s.theme = DeviceTheme::default();
+        s.apply_to(&mut cfg, &paths());
+        assert!(cfg.get("theme").is_none(), "back to the default leaves the file");
+        assert_eq!(cfg.get("color_accent"), Some("647d99"));
+        s.theme = DeviceTheme::Custom;
+        s.apply_to(&mut cfg, &paths());
+        assert_eq!(cfg.get("theme"), Some("custom"));
+    }
+
+    #[test]
+    fn system_is_the_default_and_follows_the_os() {
+        let dark = crate::themes::find("dark").unwrap();
+        let light = crate::themes::light();
+        for text in ["", "theme = system\n", "theme = clawd\n", "theme = Clawd\n", "theme = nope\n"] {
+            let s = settings(text);
+            assert_eq!(s.theme, DeviceTheme::default(), "{text:?}");
+            assert_eq!((s.colors(DARK), s.colors(LIGHT)), (dark.colors, light.colors), "{text:?}");
+        }
+        let s = settings("theme = dark\n");
+        assert_eq!((s.theme, s.colors(LIGHT)), (DeviceTheme::Preset(dark), dark.colors), "Dark stays dark");
+        let s = settings("theme = light\n");
+        assert_eq!((s.theme, s.colors(DARK)), (DeviceTheme::Preset(light), light.colors), "Light stays light");
+
+        // An old `theme = clawd` is System already, so it isn't rewritten;
+        // choosing System leaves the key out, Dark writes its own id.
+        let mut cfg = ConfigFile::parse("theme = clawd\n");
+        let mut s = Settings::from_config(&cfg, &paths(), None);
+        s.apply_to(&mut cfg, &paths());
+        assert_eq!(cfg.get("theme"), Some("clawd"));
+        s.theme = DeviceTheme::Preset(dark);
+        s.apply_to(&mut cfg, &paths());
+        assert_eq!(cfg.get("theme"), Some("dark"));
+        s.theme = DeviceTheme::default();
+        s.apply_to(&mut cfg, &paths());
+        assert!(cfg.get("theme").is_none());
+    }
+
+    #[test]
+    fn solarized_follows_the_os_and_the_fixed_ones_stay() {
+        let sol_dark = crate::themes::find("solarized_dark").unwrap();
+        let sol_light = crate::themes::find("solarized_light").unwrap();
+        for text in ["theme = solarized\n", "theme = Solarized  # both\n"] {
+            let s = settings(text);
+            assert_eq!(s.theme, DeviceTheme::Follow(&crate::themes::SOLARIZED), "{text:?}");
+            assert_eq!((s.colors(DARK), s.colors(LIGHT)), (sol_dark.colors, sol_light.colors), "{text:?}");
+        }
+        let s = settings("theme = solarized_dark\n");
+        assert_eq!((s.theme, s.colors(LIGHT)), (DeviceTheme::Preset(sol_dark), sol_dark.colors));
+        let s = settings("theme = solarized_light\n");
+        assert_eq!((s.theme, s.colors(DARK)), (DeviceTheme::Preset(sol_light), sol_light.colors));
+
+        // Written as `solarized`, read back the same; System still leaves the key out.
+        let mut cfg = ConfigFile::parse("");
+        let mut s = Settings::from_config(&cfg, &paths(), None);
+        s.theme = DeviceTheme::parse("solarized");
+        s.apply_to(&mut cfg, &paths());
+        assert_eq!(cfg.get("theme"), Some("solarized"));
+        assert_eq!(Settings::from_config(&cfg, &paths(), None).theme, s.theme);
+        assert_eq!(s.theme.as_str(), "solarized");
+        s.theme = DeviceTheme::default();
+        s.apply_to(&mut cfg, &paths());
+        assert!(cfg.get("theme").is_none());
+    }
+
+    #[test]
+    fn pace_marker() {
+        assert!(!settings("").pace_marker, "off by default");
+        assert!(settings("pace_marker = on\n").pace_marker);
+
+        let mut cfg = ConfigFile::parse("");
+        let mut s = Settings::from_config(&cfg, &paths(), None);
+        s.apply_to(&mut cfg, &paths());
+        assert!(cfg.get("pace_marker").is_none(), "the default stays out of the file");
+        s.pace_marker = true;
+        s.apply_to(&mut cfg, &paths());
+        assert_eq!(cfg.get("pace_marker"), Some("on"));
+    }
+
+    #[test]
+    fn alert_project() {
+        assert!(settings("").alert_project, "on by default");
+        assert!(!settings("alert_project = off\n").alert_project);
+
+        let mut cfg = ConfigFile::parse("");
+        let mut s = Settings::from_config(&cfg, &paths(), None);
+        s.apply_to(&mut cfg, &paths());
+        assert!(cfg.get("alert_project").is_none(), "the default stays out of the file");
+        s.alert_project = false;
+        s.apply_to(&mut cfg, &paths());
+        assert_eq!(cfg.get("alert_project"), Some("off"));
+    }
+
+    #[test]
+    fn menu_bar_usage() {
+        assert!(!settings("").menu_bar_usage, "off by default");
+        assert!(settings("menu_bar_usage = on\n").menu_bar_usage);
+
+        let mut cfg = ConfigFile::parse("");
+        let mut s = Settings::from_config(&cfg, &paths(), None);
+        s.apply_to(&mut cfg, &paths());
+        assert!(cfg.get("menu_bar_usage").is_none(), "the default stays out of the file");
+        s.menu_bar_usage = true;
+        s.apply_to(&mut cfg, &paths());
+        assert_eq!(cfg.get("menu_bar_usage"), Some("on"));
+    }
+
+    #[test]
+    fn keys_are_case_insensitive_and_comments_ignored() {
+        let c = ConfigFile::parse("# chime = on\nCHIME = on\n");
+        assert_eq!(c.get("chime"), Some("on"));
+        let c = ConfigFile::parse("# chime = on\n");
+        assert_eq!(c.get("chime"), None);
+    }
+
+    #[test]
+    fn set_preserves_everything_else() {
+        let text = "# header\n\nchime = off # quiet\nfoo = bar\n# beep = on\nclock = off\n";
+        let mut c = ConfigFile::parse(text);
+        c.set("chime", "on");
+        c.set("beep", "on");
+        c.set("poll_interval", "120");
+        assert_eq!(
+            c.render(),
+            "# header\n\nchime = on # quiet\nfoo = bar\n# beep = on\nbeep = on\nclock = off\npoll_interval = 120\n"
+        );
+        c.remove("foo");
+        assert!(c.get("foo").is_none());
+        assert!(c.render().contains("# header"));
+    }
+
+    #[test]
+    fn set_crlf_and_empty() {
+        let mut c = ConfigFile::parse("chime = off\r\n");
+        c.set("chime", "on");
+        assert_eq!(c.render(), "chime = on\r\n");
+        let mut e = ConfigFile::parse("");
+        e.set("beep", "on");
+        assert_eq!(e.render(), "beep = on\n");
+        let mut n = ConfigFile::parse("a = 1");
+        n.set("b", "2");
+        assert_eq!(n.render(), "a = 1\nb = 2\n");
+    }
+
+    #[test]
+    fn apply_only_touches_changed_keys() {
+        let p = paths();
+        let mut c = ConfigFile::parse("# mine\nchime = off\nunknown = 7\n");
+        let mut s = Settings::from_config(&c, &p, None);
+        s.alert_chime = true;
+        s.config_dirs = vec![PathBuf::from("/home/u/.claude"), PathBuf::from("/home/u/.claude-work")];
+        s.apply_to(&mut c, &p);
+        let out = c.render();
+        assert!(out.starts_with("# mine\nchime = off\nunknown = 7\n"), "{out}");
+        assert!(out.contains("alert_chime = on\n") && !out.contains("beep"), "{out}");
+        assert!(out.contains("config_dirs = ~/.claude, ~/.claude-work\n"));
+        assert!(!out.contains("poll_interval"));
+        let back = Settings::from_config(&c, &p, None);
+        assert_eq!(back, s);
+    }
+
+    #[test]
+    fn save_and_load_round_trip() {
+        let dir = std::env::temp_dir().join(format!("cm-cfg-{}", std::process::id()));
+        let path = dir.join("sub/config");
+        let mut c = ConfigFile::parse("# x\nchime = on\n");
+        c.set("beep", "on");
+        c.save(&path).unwrap();
+        assert_eq!(ConfigFile::load(&path).unwrap(), c);
+        assert_eq!(ConfigFile::load(&dir.join("missing")).unwrap(), ConfigFile::default());
+        let _ = fs::remove_dir_all(&dir);
+    }
+}

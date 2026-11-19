@@ -1,5 +1,5 @@
 // Host unit test for face_motion — the face's rise and drop as a pure
-// function of time (docs/clawd-director.md, "The face's motion"):
+// function of time (docs/pets.md, "The face's motion"):
 //
 //   pio test -d firmware -e native -f test_face_motion
 

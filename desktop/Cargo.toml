@@ -2,10 +2,10 @@
 resolver = "2"
 exclude = ["vendor"]
 members = [
-    "crates/clawdmeter-core",
-    "crates/clawdmeter-ble",
-    "crates/clawdmeter-flash",
-    "crates/clawdmeter-app",
+    "crates/clawdbuddy-core",
+    "crates/clawdbuddy-ble",
+    "crates/clawdbuddy-flash",
+    "crates/clawdbuddy-app",
 ]
 
 [workspace.package]
@@ -13,12 +13,13 @@ version = "0.1.0"
 edition = "2021"
 license = "MIT"
 rust-version = "1.88"
-repository = "https://github.com/HermannBjorgvin/Clawdmeter"
+repository = "https://github.com/tfranovic/ClawdBuddy"
+authors = ["Tin Franovic"]
 
 [workspace.dependencies]
-clawdmeter-core = { path = "crates/clawdmeter-core" }
-clawdmeter-ble = { path = "crates/clawdmeter-ble" }
-clawdmeter-flash = { path = "crates/clawdmeter-flash" }
+clawdbuddy-core = { path = "crates/clawdbuddy-core" }
+clawdbuddy-ble = { path = "crates/clawdbuddy-ble" }
+clawdbuddy-flash = { path = "crates/clawdbuddy-flash" }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }

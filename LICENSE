@@ -1,0 +1,75 @@
+ClawdBuddy is made of parts with different terms. This file says which
+terms cover which part.
+
+1. ClawdBuddy's own additions
+-----------------------------
+
+The parts written for ClawdBuddy: the office view (firmware/src/pet/team_*,
+desktop/crates/clawdbuddy-core/src/team.rs), the pet integration
+(firmware/src/pet/pet_*.cpp and .h, except as noted in part 2), and
+ClawdBuddy's changes to the files inherited from Clawdmeter. They are under
+the MIT License:
+
+MIT License
+
+Copyright (c) 2026 Tin Franovic
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+2. Code from claude-desktop-buddy
+---------------------------------
+
+firmware/src/pet/buddies/, buddy.h, buddy_common.h, and the parts of
+pet_buddy.cpp and pet_stats_core.cpp ported from
+https://github.com/anthropics/claude-desktop-buddy are under the MIT License,
+Copyright 2026 Anthropic, PBC. The full text is in
+firmware/src/pet/LICENSE-buddy.
+
+firmware/src/pet/pet_font.h is the "glcdfont" from Adafruit's GFX library,
+under the BSD License, Copyright (c) 2012 Adafruit Industries.
+
+3. Code inherited from Clawdmeter
+---------------------------------
+
+Everything else comes from https://github.com/HermannBjorgvin/Clawdmeter, by
+Hermann Björgvin Haraldsson and its contributors, and stays under that
+project's terms. This file grants no rights to it. Clawdmeter's desktop
+crates are declared MIT in their Cargo metadata. Its repository has no
+licence file; its README says:
+
+  "The software in this repository uses and adheres to the Anthropic brand
+  guidelines and uses the same proprietary fonts that Anthropic has a license
+  for but this software uses without permission as well as using assets from
+  Anthropic such as the copyrighted Clawd mascot so even though the code in
+  this repo is non-proprietary I will not license it myself under a copyleft
+  license since this repo includes proprietary fonts and copyrighted assets.
+  Please be aware of this if you fork or copy the code from this repo. You
+  have been warned!"
+
+4. Fonts and artwork
+--------------------
+
+The Styrene and Tiempos fonts (assets/, firmware/src/font_styrene_*.c,
+firmware/src/font_tiempos_*.c) and the Clawd artwork (firmware/src/
+splash_animations.h, clawd_still.h, the app and installer icons) belong to
+their owners. They are not covered by any licence in this file, and they are
+in this repository without their owners' permission, as in Clawdmeter.
+
+"Claude" and "Claude Code" are Anthropic's. ClawdBuddy is not affiliated with
+or endorsed by Anthropic.

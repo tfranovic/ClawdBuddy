@@ -13,7 +13,7 @@ static uint8_t cur_idx = DEFAULT_IDX;
 
 void brightness_init(void) {
     Preferences prefs;
-    prefs.begin("clawdmeter", true);
+    prefs.begin("clawdbuddy", true);
     uint8_t saved_idx = prefs.getUChar("brt_idx", 0xFF);
     prefs.end();
 
@@ -26,7 +26,7 @@ void brightness_cycle(void) {
     cur_idx = (cur_idx + 1) % LEVELS_COUNT;
 
     Preferences prefs;
-    prefs.begin("clawdmeter", false);
+    prefs.begin("clawdbuddy", false);
     prefs.putUChar("brt_idx", cur_idx);
     prefs.end();
 

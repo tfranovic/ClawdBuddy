@@ -5,7 +5,7 @@
 #   .pio/build/sim_pets/program
 {"name":"idle in the seat","hold_ms":5000,"s":22.0,"sr":240,"w":12.0,"wr":9000,"st":"allowed","ok":true,"t":1785474000,"tf":24,"a":0,"e":"s","es":1,"n":1}
 {"name":"tap: peek, stats, species","hold_ms":17000,"s":23.0,"sr":239,"w":12.0,"wr":8999,"st":"allowed","ok":true,"a":1,"e":"p","es":2,"n":1,"t":1785474005,"tf":24}
-{"name":"permission alert","hold_ms":8000,"s":24.0,"sr":238,"w":12.0,"wr":8998,"st":"allowed","ok":true,"a":1,"e":"p","es":2,"n":2,"lt":"Clawdmeter: Bash","m":"Permission: Clawdmeter","b":true,"t":1785474022,"tf":24}
+{"name":"permission alert","hold_ms":8000,"s":24.0,"sr":238,"w":12.0,"wr":8998,"st":"allowed","ok":true,"a":1,"e":"p","es":2,"n":2,"lt":"ClawdBuddy: Bash","m":"Permission: ClawdBuddy","b":true,"t":1785474022,"tf":24}
 {"name":"answered in the terminal","hold_ms":4000,"s":24.0,"sr":238,"w":12.0,"wr":8997,"st":"allowed","ok":true,"a":1,"e":"p","es":2,"n":2,"x":true,"t":1785474030,"tf":24}
 {"name":"question alert","hold_ms":8000,"s":25.0,"sr":237,"w":12.0,"wr":8996,"st":"allowed","ok":true,"a":1,"e":"p","es":2,"n":2,"m":"Question: claude-desktop-buddy","b":true,"t":1785474034,"tf":24}
 {"name":"answered in the terminal","hold_ms":4000,"s":25.0,"sr":237,"w":12.0,"wr":8995,"st":"allowed","ok":true,"a":1,"e":"p","es":2,"n":2,"x":true,"t":1785474042,"tf":24}

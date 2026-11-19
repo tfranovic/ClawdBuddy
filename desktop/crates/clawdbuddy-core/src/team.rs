@@ -200,6 +200,8 @@ pub struct Detail {
     pub sub_kinds: Vec<(String, u8)>,
     /// Tasks completed and created.
     pub tasks: (u32, u32),
+    /// Lines added and removed in the session, from the status line.
+    pub lines: Option<(u64, u64)>,
 }
 
 /// One desk.
@@ -456,8 +458,14 @@ pub fn desks_with(events: &[TeamEvent], now: i64, beside: &Beside) -> Vec<Desk> 
         let numbers = beside.status.get(sid);
         let clean =
             |t: &str, limit| -> String { to_ascii(t, limit).chars().filter(|c| *c != '|' && *c != '"').collect() };
-        let project = clean(&s.project, NAME_LIMIT);
-        let name = if s.title.is_empty() { project.clone() } else { clean(&s.title, TITLE_LIMIT) };
+        // On the desk a long project name ends in dots; a title is simply cut.
+        let project = clean(&s.project, TITLE_LIMIT);
+        let (name, label) = if s.title.is_empty() {
+            (project.clone(), clean(&s.project, NAME_LIMIT))
+        } else {
+            let t = clean(&s.title, TITLE_LIMIT);
+            (t.clone(), t.chars().take(NAME_LIMIT).collect::<String>().trim_end().to_owned())
+        };
         let mut kinds: BTreeMap<&str, u8> = BTreeMap::new();
         for sub in s.subs.values() {
             *kinds.entry(if sub.kind.is_empty() { "agent" } else { &sub.kind }).or_default() += 1;
@@ -470,19 +478,20 @@ pub fn desks_with(events: &[TeamEvent], now: i64, beside: &Beside) -> Vec<Desk> 
             state,
             subs,
             quiet: quiet.min(subs),
-            name: name.chars().take(NAME_LIMIT).collect::<String>().trim_end().to_owned(),
+            name: label,
             context: numbers.and_then(|n| n.context),
             mode: mode_letter(&s.mode),
             model: model_letter(&model_name),
             detail: Detail {
                 title: name,
-                project: clean(&s.project, TITLE_LIMIT),
+                project,
                 since: (now - since).max(0),
                 tool: s.open.last().cloned().unwrap_or_else(|| s.last_tool_name.clone()),
                 model: clean(&model_name, 24),
                 mode: mode_words(&s.mode).to_owned(),
                 sub_kinds,
                 tasks: s.tasks,
+                lines: numbers.and_then(|n| n.lines).filter(|l| *l != (0, 0)),
             },
         });
     }
@@ -563,6 +572,8 @@ fn derived_since(s: &Session, state: State, now: i64) -> i64 {
 /// Desks that would read the same get a number after the name, in the order
 /// they sit: `api`, `api 2`.
 fn number_twins(desks: &mut [Desk]) {
+    // The number has to survive the cut a second office brings ([`encode`]).
+    let limit = if desks.len() > OFFICE_DESKS { NAME_LIMIT_CROWDED } else { NAME_LIMIT };
     let names: Vec<String> = desks.iter().map(|d| d.name.clone()).collect();
     let mut seen: HashMap<&str, u32> = HashMap::new();
     for (d, name) in desks.iter_mut().zip(&names) {
@@ -570,8 +581,9 @@ fn number_twins(desks: &mut [Desk]) {
         *n += 1;
         if *n > 1 && !name.is_empty() {
             let tail = format!(" {n}");
-            let keep = NAME_LIMIT_CROWDED.saturating_sub(tail.len()).min(name.len());
-            d.name = format!("{}{tail}", name[..keep].trim_end());
+            let base = name.trim_end_matches("...");
+            let keep = limit.saturating_sub(tail.len()).min(base.len());
+            d.name = format!("{}{tail}", base[..keep].trim_end());
         }
     }
 }
@@ -654,6 +666,9 @@ pub fn encode_detail(d: &Desk) -> String {
     }
     if x.tasks.1 > 0 {
         foot.push(format!("tasks {}/{}", x.tasks.0.min(x.tasks.1), x.tasks.1));
+    }
+    if let Some((added, removed)) = x.lines {
+        foot.push(format!("+{added} -{removed} lines"));
     }
     let text = format!("{:02x}|{}|{what}|{}|{team}|{}", d.id, x.title, about.join(" - "), foot.join(" - "));
     to_ascii(&text, DETAIL_LIMIT).replace('"', "'")
@@ -934,6 +949,10 @@ mod tests {
         assert_eq!(d[0].detail.tasks, (1, 2));
         // Two sessions in one project read apart.
         assert_eq!((d[1].name.as_str(), d[2].name.as_str()), ("api", "api 2"));
+        let long = [ev(t, "Stop a - - a-long-project-name"), ev(t + 1, "Stop b - - a-long-project-name")];
+        let twins = desks(&long, t + 2);
+        assert_eq!((twins[0].name.as_str(), twins[1].name.as_str()), ("a-long-pr...", "a-long-pr 2"));
+        assert_eq!(twins[0].detail.title, "a-long-project-name");
         let card = encode_detail(&d[0]);
         assert!(
             card.contains("|Fix the login page|Thinking 5s|claude-fable-5-2 - plan mode|No sub-agents|api - tasks 1/2"),
@@ -993,12 +1012,18 @@ mod tests {
         let beside = Beside {
             status: HashMap::from([(
                 "s1".to_owned(),
-                StatusNumbers { context: Some(42), model: "Fable 5.2".into(), ..StatusNumbers::default() },
+                StatusNumbers {
+                    context: Some(42),
+                    model: "Fable 5.2".into(),
+                    lines: Some((120, 7)),
+                    ..StatusNumbers::default()
+                },
             )]),
             ..Beside::default()
         };
         let d = &desks_with(&evs, t + 3, &beside)[0];
         assert_eq!((d.context, d.model), (Some(42), 'f'));
         assert!(encode_detail(d).contains("Fable 5.2 - context 42%"));
+        assert!(encode_detail(d).ends_with("+120 -7 lines"), "{}", encode_detail(d));
     }
 }

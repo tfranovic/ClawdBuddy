@@ -284,7 +284,12 @@ static void usage_text(const UsageData* d) {
     else if (d->weekly_only) snprintf(usage, sizeof(usage), "Week %d%%", w);
     else if (d->session_reset_mins < 0) snprintf(usage, sizeof(usage), "5h --   week %d%%", w);
     else snprintf(usage, sizeof(usage), "5h %d%%   week %d%%", s, w);
+    // A limit used up colours it; extra usage paying for requests is said.
     usage_hot = strcmp(d->status, "limited") == 0;
+    if (strcmp(d->status, "overage") == 0) {
+        const size_t n = strlen(usage);
+        snprintf(usage + n, sizeof(usage) - n, "  +extra");
+    }
 }
 
 void team_view_on_payload(const UsageData* d) {

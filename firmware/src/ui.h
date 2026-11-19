@@ -31,4 +31,6 @@ void ui_set_pair_hint(PairHint hint);
 
 // Attention message on the status line (scrolls when long); NULL clears it
 // and the whimsical status line resumes.
+// Seconds since local midnight by the app's clock; -1 when it sends none.
+long ui_clock_seconds(void);
 void ui_set_alert_text(const char* message);

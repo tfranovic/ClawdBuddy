@@ -33,13 +33,19 @@ pub struct HookSpec {
 /// The six hooks: the attention card's four, Stop, and StopFailure (fired in
 /// Stop's place when an API error such as a usage limit ends the turn: it
 /// alerts, and ends the turn for the activity tracker), all logging events.
-pub const HOOKS: [HookSpec; 6] = [
+///
+/// Then three for the team view, which only write `team.log`: sub-agents
+/// starting and stopping, and the session ending.
+pub const HOOKS: [HookSpec; 9] = [
     HookSpec { event: "UserPromptSubmit", matcher: None, args: "clear event" },
     HookSpec { event: "PostToolUse", matcher: None, args: "clear event" },
     HookSpec { event: "Stop", matcher: None, args: "event" },
     HookSpec { event: "StopFailure", matcher: None, args: "alert event" },
     HookSpec { event: "Notification", matcher: None, args: "alert event" },
     HookSpec { event: "PreToolUse", matcher: Some("AskUserQuestion"), args: "alert event" },
+    HookSpec { event: "SubagentStart", matcher: None, args: "team" },
+    HookSpec { event: "SubagentStop", matcher: None, args: "team" },
+    HookSpec { event: "SessionEnd", matcher: None, args: "team" },
 ];
 
 /// The binary hooks should run: the path that outlives this process (an
@@ -148,7 +154,7 @@ pub fn owner(cmd: &str) -> Owner {
         return Owner::Foreign;
     }
     let args: Vec<&str> = words.collect();
-    if !matches!(args.first(), Some(&"alert" | &"clear" | &"event")) {
+    if !matches!(args.first(), Some(&"alert" | &"clear" | &"event" | &"team")) {
         return Owner::Foreign;
     }
     if !basename(&exe).starts_with("clawdmeter") {

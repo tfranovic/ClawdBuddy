@@ -11,6 +11,7 @@
 #include "usage_rate.h"
 #ifdef PET_ASCII
 #include "pet/pet_face.h"
+#include "pet/team_view.h"
 #endif
 #include <Arduino.h>
 #include <lvgl.h>
@@ -76,6 +77,7 @@ static ClawdRng    rng;
 static int         peek_x = 0;                // where the peek's tap landed
 static uint32_t    peek_up_at = 0;            // the peek's face started rising
 static lv_indev_t* touch_indev = NULL;
+static int tap_y = -1;                 // the tap being handled; -1 when it has no y
 
 static uint32_t now_ms(void) { return millis(); }
 
@@ -254,6 +256,11 @@ void director_tap(int x) {
     if (minimal) return;
     if (beat == B_HOME || beat == B_CORNER) {
         if (pairing_touch) return;                // the hint is the control now
+#ifdef PET_ASCII
+        // With the team view on, a tap at either side switches views and
+        // only the pet and its stats raise the peek.
+        if (team_view_tap(x, tap_y)) return;
+#endif
         tap_home(x);
         return;
     }
@@ -308,7 +315,9 @@ static void indev_cb(lv_event_t* e) {
     (void)e;
     lv_point_t p = { 0, 0 };
     if (touch_indev) lv_indev_get_point(touch_indev, &p);
+    tap_y = p.y;
     director_tap(p.x);
+    tap_y = -1;
 }
 
 void director_on_payload(const UsageData* d, const SignalsUpdate* sig) {

@@ -182,6 +182,7 @@ pub async fn run(paths: Paths, mut commands: mpsc::UnboundedReceiver<Command>, s
     let appearance = AppearanceWatch::spawn();
     let mut shown_appearance = None;
     let inbox = AttentionInbox::new(&paths.state_dir);
+    let mut team = clawdmeter_core::team::TeamTracker::new(&paths.state_dir);
     let (mut tail, seed) = EventTail::open(paths.events_log());
     engine.seed_events(&seed);
     engine.set_hooks_installed(tail.exists());
@@ -272,6 +273,7 @@ pub async fn run(paths: Paths, mut commands: mpsc::UnboundedReceiver<Command>, s
         }
         engine.set_hooks_installed(tail.exists());
         engine.set_last_tool(clawdmeter_core::attention::read_last_tool(&paths.state_dir));
+        engine.set_team(team.poll(now));
         let alert = inbox.take_alert(SystemTime::now());
         let clears = inbox.take_clears();
         if alert.is_some() || !clears.is_empty() {

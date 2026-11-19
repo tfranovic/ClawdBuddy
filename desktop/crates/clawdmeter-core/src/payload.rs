@@ -117,6 +117,14 @@ pub struct Payload {
     /// value it got.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pm: Option<u8>,
+    /// 1 = the agent team view is on (a side tap on the device switches to
+    /// it), 0 = off. The device keeps the last value it got.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tv: Option<u8>,
+    /// The team view's desks ([`crate::team::encode`]); sent only while `tv`
+    /// is on. Dropped after `lt` when a write would not fit.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tm: Option<String>,
     /// What the primary button does ([`crate::buttons::ButtonAction::code`]).
     /// The device keeps the last value it got.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -142,7 +150,7 @@ pub struct Payload {
 /// Every key [`Payload`] can emit, in serialization order.
 pub const PAYLOAD_KEYS: &[&str] = &[
     "s", "sr", "w", "wr", "wf", "st", "acct", "pv", "rc", "rx", "tp", "pd", "rd", "t", "tf", "c", "ok", "b", "m", "x",
-    "a", "e", "es", "n", "lt", "rp", "lv", "aa", "pm", "k1", "k2", "k3", "th", "fc",
+    "a", "e", "es", "n", "lt", "rp", "lv", "aa", "pm", "tv", "tm", "k1", "k2", "k3", "th", "fc",
 ];
 
 /// The fast-clock keys added in v0.4 (old firmware ignores them).
@@ -362,6 +370,10 @@ impl Payload {
         let mut p = self.clone();
         if data.len() > limit && p.lt.is_some() {
             p.lt = None;
+            data = p.to_json().into_bytes();
+        }
+        if data.len() > limit && p.tm.is_some() {
+            p.tm = None;
             data = p.to_json().into_bytes();
         }
         let mut msg = p.m.clone().unwrap_or_default();
@@ -679,6 +691,8 @@ mod tests {
             lv: Some(5),
             aa: Some(120),
             pm: Some(1),
+            tv: Some(1),
+            tm: None,
             k1: Some(chord),
             k2: Some(chord),
             k3: Some(chord),
@@ -722,6 +736,8 @@ mod tests {
             lv: Some(3),
             aa: Some(120),
             pm: Some(1),
+            tv: Some(1),
+            tm: Some("a3w20api".into()),
             k1: Some(1),
             k2: Some(2),
             k3: Some(6),

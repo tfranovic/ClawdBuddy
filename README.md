@@ -41,6 +41,12 @@ Added by this fork:
 - **Limit alerts.** When a usage limit stops a session mid-turn, the screen
   beeps and reads `Limit reached: my-project` instead of carrying on as if
   Claude were still working. Other API errors read `Stopped on error: …`.
+- **An agent team view.** An optional second screen draws your sessions as
+  an office: a desk per session (a second office opens past six), the main agent behind it, its sub-agents
+  on a bench in front. People type, walk to the whiteboard to think, raise
+  a `?` when they wait for you, and doze between turns. Turn it on with
+  **Agent team view** on the app's Device page, then tap the left or right
+  side of the screen to switch. See [docs/pets.md](docs/pets.md#the-agent-team-view).
 - **A Fable card.** On an account with no 5-hour limit, Fable's weekly limit
   gets its own meter under the Weekly one.
 

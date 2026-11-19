@@ -22,6 +22,8 @@ use crate::usage::{AccountState, Provider, UsageError, UsageReading};
 
 /// `a` changes are sent at most this often (s).
 pub const ACTIVITY_MIN_INTERVAL: i64 = 5;
+/// Least seconds between writes made only because the team view changed.
+pub const TEAM_MIN_INTERVAL: i64 = 2;
 /// `e`/`es` ride along for this long after the event (s), so a device that
 /// reconnects or reboots later doesn't react to an old event.
 pub const EVENT_FRESH_SECS: i64 = 60;
@@ -148,6 +150,11 @@ pub struct Engine {
     last_tool: Option<String>,
     sent_lt: Option<String>,
     sent_lt_at: i64,
+    /// The team view's desks (`tm`), and what the device last got.
+    team: String,
+    sent_tm: Option<String>,
+    sent_tm_at: i64,
+    sent_tv: Option<u8>,
     /// The liveliness the device last got (`lv`).
     sent_lv: Option<u8>,
     /// The attention animation the device last got (`aa`).
@@ -208,6 +215,10 @@ impl Engine {
             last_tool: None,
             sent_lt: None,
             sent_lt_at: 0,
+            team: String::new(),
+            sent_tm: None,
+            sent_tm_at: 0,
+            sent_tv: None,
             sent_lv: None,
             sent_aa: None,
             sent_pm: None,
@@ -306,6 +317,11 @@ impl Engine {
         }
     }
 
+    /// The team view's desks ([`crate::team::TeamTracker::poll`]).
+    pub fn set_team(&mut self, tm: String) {
+        self.team = tm;
+    }
+
     /// A new alert went up since the last call and `desktop_chime` is on:
     /// play the chime on this computer.
     pub fn take_desktop_chime(&mut self) -> bool {
@@ -335,6 +351,8 @@ impl Engine {
         self.sent_a = None;
         self.sent_n = None;
         self.sent_lt = None;
+        self.sent_tm = None;
+        self.sent_tv = None;
         self.sent_lv = None;
         self.sent_aa = None;
         self.sent_pm = None;
@@ -654,6 +672,10 @@ impl Engine {
             && self.last_tool.is_some()
             && self.sent_lt != self.last_tool
             && now - self.sent_lt_at >= ACTIVITY_MIN_INTERVAL;
+        let tv = u8::from(self.settings.team_view);
+        let tm_changed = tv == 1
+            && self.sent_tm.as_deref() != Some(self.team.as_str())
+            && now - self.sent_tm_at >= TEAM_MIN_INTERVAL;
         // A changed device setting goes out right away, like an event.
         let aa = self.settings.attention_anim.seconds();
         let pm = u8::from(self.settings.pace_marker);
@@ -664,6 +686,7 @@ impl Engine {
         let prefs_changed = self.sent_lv != Some(self.settings.liveliness)
             || self.sent_aa != Some(aa)
             || self.sent_pm != Some(pm)
+            || self.sent_tv != Some(tv)
             || self.sent_k != Some(k)
             || self.sent_th != Some(th)
             || self.sent_tf != Some(tf);
@@ -680,7 +703,7 @@ impl Engine {
                 WriteKind::Poll
             } else if self.attention.pending() {
                 WriteKind::Attention
-            } else if (new_event || a_changed || n_changed || lt_changed || prefs_changed) && !self.stale(now) {
+            } else if (new_event || a_changed || n_changed || lt_changed || tm_changed || prefs_changed) && !self.stale(now) {
                 // Any ok payload refreshes the device's DATA_FRESH_MS, so
                 // while the numbers are stale only alerts and polls go out
                 // and the device can show its stale state.
@@ -704,6 +727,10 @@ impl Engine {
             p.lv = Some(self.settings.liveliness);
             p.aa = Some(aa);
             p.pm = Some(pm);
+            p.tv = Some(tv);
+            if tv == 1 {
+                p.tm = Some(self.team.clone());
+            }
             [p.k1, p.k2, p.k3] = k.map(Some);
             p.th = Some(th);
             // The Fable overlay's colour goes with Claude's numbers only; the
@@ -767,6 +794,13 @@ impl Engine {
         }
         if let Some(pm) = w.payload.pm {
             self.sent_pm = Some(pm);
+        }
+        if let Some(tv) = w.payload.tv {
+            self.sent_tv = Some(tv);
+        }
+        if w.payload.tm.is_some() && self.sent_tm != w.payload.tm {
+            self.sent_tm.clone_from(&w.payload.tm);
+            self.sent_tm_at = now;
         }
         if let (Some(k1), Some(k2), Some(k3)) = (w.payload.k1, w.payload.k2, w.payload.k3) {
             self.sent_k = Some([k1, k2, k3]);
@@ -892,7 +926,7 @@ mod tests {
         assert_eq!(w.kind, WriteKind::Poll);
         assert_eq!(
             w.payload.to_json(),
-            r#"{"s":15,"sr":60,"w":10,"wr":1440,"st":"allowed","acct":"pro","ok":true,"lv":3,"aa":120,"pm":0,"k1":1,"k2":2,"k3":6,"th":"0000001f1f1efaf9f5b0aea5d97757788c5dd97757c0392b2a2a28d97757141413","fc":"9775c7"}"#
+            r#"{"s":15,"sr":60,"w":10,"wr":1440,"st":"allowed","acct":"pro","ok":true,"lv":3,"aa":120,"pm":0,"tv":0,"k1":1,"k2":2,"k3":6,"th":"0000001f1f1efaf9f5b0aea5d97757788c5dd97757c0392b2a2a28d97757141413","fc":"9775c7"}"#
         );
         assert!(write(&mut e, T0 + 1).is_none());
     }
@@ -914,7 +948,7 @@ mod tests {
         let w = write(&mut e, T0).unwrap();
         assert_eq!(
             w.payload.to_json(),
-            r#"{"s":0,"sr":-1,"w":48,"wr":1440,"st":"allowed","acct":"week","ok":true,"lv":3,"aa":120,"pm":0,"k1":1,"k2":2,"k3":6,"th":"0000001f1f1efaf9f5b0aea5d97757788c5dd97757c0392b2a2a28d97757141413","fc":"9775c7"}"#
+            r#"{"s":0,"sr":-1,"w":48,"wr":1440,"st":"allowed","acct":"week","ok":true,"lv":3,"aa":120,"pm":0,"tv":0,"k1":1,"k2":2,"k3":6,"th":"0000001f1f1efaf9f5b0aea5d97757788c5dd97757c0392b2a2a28d97757141413","fc":"9775c7"}"#
         );
         // An account with the limit still wakes at its session reset.
         e.on_poll_results(T0 + 200, vec![(dir.clone(), Ok(reading(5)))]);
@@ -933,7 +967,7 @@ mod tests {
         assert_eq!(hb.kind, WriteKind::Heartbeat);
         assert_eq!(
             hb.payload.to_json(),
-            r#"{"s":15,"sr":55,"w":10,"wr":1435,"st":"allowed","acct":"pro","c":1,"ok":true,"rp":1,"lv":3,"aa":120,"pm":0,"k1":1,"k2":2,"k3":6,"th":"0000001f1f1efaf9f5b0aea5d97757788c5dd97757c0392b2a2a28d97757141413","fc":"9775c7"}"#
+            r#"{"s":15,"sr":55,"w":10,"wr":1435,"st":"allowed","acct":"pro","c":1,"ok":true,"rp":1,"lv":3,"aa":120,"pm":0,"tv":0,"k1":1,"k2":2,"k3":6,"th":"0000001f1f1efaf9f5b0aea5d97757788c5dd97757c0392b2a2a28d97757141413","fc":"9775c7"}"#
         );
         // Three misses: stale, heartbeats stop so the device's freshness lapses.
         for i in 1..=3 {
@@ -1527,6 +1561,27 @@ mod tests {
         e.on_connected();
         let w = write(&mut e, T0 + 6).unwrap();
         assert_eq!((w.payload.k2, w.payload.k3), (Some(4), Some(0x11310)), "resent on a reconnect");
+    }
+
+    #[test]
+    fn team_view_is_sent_only_while_on_and_when_it_changes() {
+        let mut e = Engine::new(settings(""));
+        e.on_poll_results(T0, vec![(PathBuf::from("/h/.claude"), Ok(reading(15)))]);
+        e.set_team("a3w00api".into());
+        let w = write(&mut e, T0).unwrap();
+        assert_eq!((w.payload.tv, w.payload.tm.clone()), (Some(0), None), "off: no desks");
+        assert!(write(&mut e, T0 + 1).is_none(), "a team change is not news while off");
+        e.update_settings(settings("team_view = on\n"));
+        let w = write(&mut e, T0 + 2).expect("the switch goes out right away");
+        assert_eq!((w.payload.tv, w.payload.tm.as_deref()), (Some(1), Some("a3w00api")));
+        assert!(write(&mut e, T0 + 3).is_none(), "nothing new");
+        e.set_team("a3t10api".into());
+        assert!(write(&mut e, T0 + 3).is_none(), "not more often than TEAM_MIN_INTERVAL");
+        let w = write(&mut e, T0 + 2 + TEAM_MIN_INTERVAL).expect("a changed team is sent");
+        assert_eq!((w.kind, w.payload.tm.as_deref()), (WriteKind::Event, Some("a3t10api")));
+        e.set_team(String::new());
+        let w = write(&mut e, T0 + 20).expect("the office emptying is sent too");
+        assert_eq!(w.payload.tm.as_deref(), Some(""));
     }
 
     #[test]

@@ -17,6 +17,7 @@
 #include "pace.h"
 #include "fable.h"
 #include "pet/pet_home.h"
+#include "pet/team_view.h"
 
 // Where everything goes, from the panel's shape (layout.h). Computed once in
 // ui_init() and treated as const for the rest of the program; a new panel
@@ -746,6 +747,7 @@ void ui_init(void) {
             // body on a 72 px slot and stands it PET_FEET_Y down the canvas).
             mascot_create(scr, L.pet.x + L.pet.w / 2 - 36, L.pet.y + L.pet.h * 70 / 82, cell);
             pet_home_create(scr, L.stats.x, L.stats.y, L.stats.w, L.activity.x, L.activity.y, L.activity.w);
+            team_view_init(scr, L.card[0].y);
         } else if (!mascot_create(scr, L.logo_x, feet, cell)) {
             logo_img = lv_image_create(scr);
             lv_image_set_src(logo_img, &logo_dsc);
@@ -1242,7 +1244,15 @@ void ui_update_battery(int percent, bool charging, bool usb_power) {
     apply_battery_visibility();
 }
 
+long ui_clock_seconds(void) {
+    if (clock_base_epoch <= 0) return -1;
+    return (long)((clock_base_epoch + (millis() - clock_base_ms) / 1000) % 86400);
+}
+
 void ui_set_alert_text(const char* message) {
+#ifdef PET_ASCII
+    team_view_alert(message);
+#endif
     if (message && message[0]) {
         alert_active = true;
         // Minimal mode: nothing moves, so a long message is cut, not scrolled.

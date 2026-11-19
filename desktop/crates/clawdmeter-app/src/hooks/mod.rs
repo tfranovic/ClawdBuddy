@@ -14,6 +14,9 @@
 //! * `event` appends `<unix_ts> <hook_event_name> <session_id>` to
 //!   `events.log`, rolling it to `events.log.1` past 256 KB.
 //!
+//! * every invocation also appends to `team.log` (see [`team_line`]), which
+//!   the agent team view is built from; `team` does only that.
+//!
 //! `alert event` / `clear event` do both from one read of stdin. Only the
 //! event name and session id are recorded, never the prompt or the tool call.
 //! Hook stdout can reach the model, so the hook prints nothing and always
@@ -52,6 +55,8 @@ pub enum Action {
     Clear,
     /// Append to events.log.
     Event,
+    /// Only the team line every invocation writes (`team.log`).
+    Team,
     /// Unknown or missing: do nothing (still exit 0).
     None,
 }
@@ -63,6 +68,7 @@ impl Mode {
             Some("alert") => Action::Alert,
             Some("clear") => Action::Clear,
             Some("event") => Action::Event,
+            Some("team") => Action::Team,
             _ => Action::None,
         };
         Mode { action, log_too: args.get(1).map(String::as_str) == Some("event") }
@@ -81,11 +87,12 @@ pub fn run(mode: Mode, input: &str, state_dir: &Path, now_unix: u64) {
         let _ = log_event(&v, state_dir, now_unix);
     }
     let _ = write_last_tool(&v, state_dir);
+    let _ = log_team(&v, state_dir, now_unix);
     let _ = match mode.action {
         Action::Alert => write_alert(&v, state_dir),
         Action::Clear => touch_clear(&v, state_dir),
         Action::Event => log_event(&v, state_dir, now_unix),
-        Action::None => Ok(()),
+        Action::Team | Action::None => Ok(()),
     };
 }
 
@@ -148,6 +155,35 @@ fn log_event(v: &Value, dir: &Path, now_unix: u64) -> io::Result<()> {
         let _ = fs::rename(&f, dir.join("events.log.1"));
     }
     // One write call: concurrent hooks append whole lines (O_APPEND).
+    OpenOptions::new().create(true).append(true).open(&f)?.write_all(line.as_bytes())
+}
+
+/// `team.log` rolls over once it is larger than this.
+pub const TEAM_ROLL_BYTES: u64 = 131_072;
+
+/// The team view's line (`clawdmeter_core::team`):
+/// `<ts> <event> <session> <agent|-> <detail|-> <project>`. The agent is the
+/// sub-agent's id when the hook fired inside one. The detail is the tool's
+/// name, the notification's type or the sub-agent's type, never an input or
+/// an output. `None` without a session id.
+pub fn team_line(v: &Value, now_unix: u64) -> Option<String> {
+    let obj = v.as_object()?;
+    let text = |k: &str| obj.get(k).and_then(Value::as_str).map(sanitize).filter(|s| !s.is_empty());
+    let event = text("hook_event_name")?;
+    let sid = text("session_id")?;
+    let agent = text("agent_id");
+    let detail = text("tool_name").or_else(|| text("notification_type")).or_else(|| text("agent_type"));
+    let project = project_of(obj.get("cwd")).unwrap_or_default();
+    let dash = |o: Option<String>| o.unwrap_or_else(|| "-".to_owned());
+    Some(format!("{now_unix} {event} {sid} {} {} {project}\n", dash(agent), dash(detail)))
+}
+
+fn log_team(v: &Value, dir: &Path, now_unix: u64) -> io::Result<()> {
+    let Some(line) = team_line(v, now_unix) else { return Ok(()) };
+    let f = dir.join("team.log");
+    if fs::metadata(&f).is_ok_and(|m| m.is_file() && m.len() > TEAM_ROLL_BYTES) {
+        let _ = fs::rename(&f, dir.join("team.log.1"));
+    }
     OpenOptions::new().create(true).append(true).open(&f)?.write_all(line.as_bytes())
 }
 
@@ -309,6 +345,28 @@ mod tests {
         assert_eq!(Mode::parse(&args("event")), Mode { action: Action::Event, log_too: false });
         assert_eq!(Mode::parse(&args("bogus event")), Mode { action: Action::None, log_too: true });
         assert_eq!(Mode::parse(&[]), Mode { action: Action::None, log_too: false });
+    }
+
+    #[test]
+    fn team_lines() {
+        let v = json!({"hook_event_name": "PostToolUse", "session_id": "s1", "cwd": "/home/me/my api",
+            "tool_name": "Bash", "tool_input": {"command": "secret"}, "agent_id": "agent-7", "agent_type": "Explore"});
+        assert_eq!(team_line(&v, 9).unwrap(), "9 PostToolUse s1 agent-7 Bash my api\n");
+        let v = json!({"hook_event_name": "SubagentStart", "session_id": "s1", "cwd": "/w/api",
+            "agent_id": "a1", "agent_type": "abra:reviewer"});
+        assert_eq!(team_line(&v, 9).unwrap(), "9 SubagentStart s1 a1 abrareviewer api\n");
+        let v = json!({"hook_event_name": "Notification", "session_id": "s1", "notification_type": "permission_prompt"});
+        assert_eq!(team_line(&v, 9).unwrap(), "9 Notification s1 - permission_prompt \n");
+        assert!(team_line(&json!({"hook_event_name": "Stop"}), 9).is_none());
+        // The core crate reads what this writes.
+        let ev = clawdmeter_core::team::parse_line("9 PostToolUse s1 agent-7 Bash my api").unwrap();
+        assert_eq!((ev.agent.as_deref(), ev.project.as_str()), (Some("agent-7"), "my api"));
+
+        let d = dir("team");
+        run(Mode::parse(&args("team")), &json!({"hook_event_name": "SessionEnd", "session_id": "s1"}).to_string(), &d, 5);
+        assert_eq!(fs::read_to_string(d.join("team.log")).unwrap(), "5 SessionEnd s1 - - \n");
+        assert!(!d.join("events.log").exists());
+        let _ = fs::remove_dir_all(&d);
     }
 
     #[test]
@@ -498,6 +556,8 @@ mod tests {
                             .map(|e| e.file_name().to_string_lossy().into_owned())
                             // The script leaves attention.<pid> behind when jq fails.
                             .filter(|n| !n.starts_with("attention."))
+                            // Not the script's: the team view's log.
+                            .filter(|n| n != "team.log")
                             .map(|n| {
                                 let body = unkinded(fs::read_to_string(d.join(&n)).unwrap_or_default());
                                 let body = body

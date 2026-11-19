@@ -513,6 +513,9 @@ pub struct Settings {
     pub attention_anim: AttentionAnim,
     /// Pace marker on the device's usage bars (`pm`, default off).
     pub pace_marker: bool,
+    /// The agent team view on the device (`tv`, default off): sessions as
+    /// desks in an office, a side tap away from the meters.
+    pub team_view: bool,
     /// The main meter's percentage beside the macOS menu bar icon
     /// (`menu_bar_usage`, default off).
     pub menu_bar_usage: bool,
@@ -687,6 +690,7 @@ impl Settings {
             liveliness: cfg.get("liveliness").map(parse_liveliness).unwrap_or(DEFAULT_LIVELINESS),
             attention_anim: cfg.get("attention_anim").map(AttentionAnim::parse).unwrap_or_default(),
             pace_marker: on_off(cfg.get("pace_marker"), false),
+            team_view: on_off(cfg.get("team_view"), false),
             menu_bar_usage: on_off(cfg.get("menu_bar_usage"), false),
             buttons: Button::ALL.map(|b| {
                 cfg.get(b.config_key()).map_or(b.default_action(), |v| ButtonAction::parse(v, b.default_action()))
@@ -789,6 +793,7 @@ impl Settings {
             ("alert_chime", "beep", self.alert_chime, current.alert_chime),
             ("desktop_chime", "", self.desktop_chime, current.desktop_chime),
             ("pace_marker", "", self.pace_marker, current.pace_marker),
+            ("team_view", "", self.team_view, current.team_view),
             ("alert_project", "", self.alert_project, current.alert_project),
             ("menu_bar_usage", "", self.menu_bar_usage, current.menu_bar_usage),
         ] {

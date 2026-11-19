@@ -34,6 +34,48 @@ On panels other than 480×480 the seat sits at the top edge, so the overlays
 the species draw above the body (Zs, hearts, exclamation marks) are mostly
 cut off there. They show in full on the large pet.
 
+## The agent team view
+
+Off by default; **Agent team view** on the app's Device page (`team_view = on`)
+turns it on. 480×480 panels only.
+
+![Six desks, four taken, people at the desks and one at the whiteboard](images/pets/team.png)
+
+| You see | It means |
+| --- | --- |
+| A desk with a name under it | A session, named after its working directory. Sessions sit in the order they started, six to an office. A seventh opens a second office (twelve sessions at most: what one Bluetooth write holds; names are cut to 8 characters while it is open). When a session leaves, the ones after it move up a desk, through the door when that desk is in the other office, and an office left empty is gone. |
+| The person behind the desk | The session's main agent. Typing with the monitor lit: running tools. At the whiteboard: in a turn with no tool call for 10 seconds or more (thinking, or one long tool). A `?` bubble and an orange name: waiting for you. Awake with thinking dots over its head: its turn is over but its sub-agents are still running. Head down under a `z`: between turns. At the water cooler with a cup: between turns for 2 minutes or more. |
+| Smaller people on the bench in front | Its sub-agents, up to four; `+N` after the name counts the rest. Now and then one walks to the whiteboard and back. One with no event for 2 minutes waits at the water cooler until it does something or times out. |
+| The wall clock | The app's time, when the clock setting is on; no hands otherwise. |
+| People walking to or from the door | A session or a sub-agent starting or ending. |
+| The bottom line | Sessions and sub-agents, or the alert. |
+
+A session leaves 15 minutes after its last turn ended, or when it exits.
+
+Controls with the view on: a tap in the left or right third of the screen
+steps through the views, which form a ring: the meters, the first office,
+the second when there is one. The bottom line says which office is up. On the meters, a tap on the pet
+or its stats raises the large pet; the cards do nothing. With the view off,
+any tap on the meters raises the large pet, as before.
+
+Where the data comes from: every hook call appends a line to `team.log` in
+the app's state folder (time, event, session id, sub-agent id, tool or
+notification type, project name; never a prompt or a tool's input). Three
+hooks exist only for this: `SubagentStart`, `SubagentStop` and `SessionEnd`.
+The app folds the last hour into the `tm` field (`team.rs`); the firmware
+keeps the scene and draws it at 480×480 (`pet/team_core.cpp`, tested by
+`test_team`); the names and the bottom line are labels over it
+(`pet/team_view.cpp`). Claude Code sometimes drops a
+sub-agent's stop event, so a sub-agent silent for 10 minutes is taken as gone,
+and the end of a turn clears the bench.
+
+```bash
+SIM_FAST=1 SIM_SCENARIO=sim/team.jsonl SIM_TAPS="3000@440,300" .pio/build/sim_pets/program
+# two offices, and desks closing up:
+SIM_FAST=1 SIM_SCENARIO=sim/team-two-offices.jsonl \
+  SIM_TAPS="3000@440,300;16000@440,300;40000@40,300" .pio/build/sim_pets/program
+```
+
 ## States
 
 | Pet state | When |

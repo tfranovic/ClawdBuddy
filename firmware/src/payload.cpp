@@ -117,6 +117,10 @@ bool payload_parse(const char* json, UsageData* out, const char** err) {
         d.attn_anim_s = (int16_t)(v < 0 ? 0 : v > 120 ? 120 : v);
     }
 
+    JsonVariant tv = doc["tv"];
+    d.team_view = tv.isNull() ? -1 : (int8_t)((tv | 0) ? 1 : 0);
+    d.has_team = !doc["tm"].isNull();
+    copy_str(d.team, sizeof(d.team), doc["tm"] | "");
     JsonVariant pm = doc["pm"];
     d.pace_marker = pm.isNull() ? -1 : (int8_t)((pm | 0) ? 1 : 0);
     d.btn_primary   = button_field(doc["k1"]);

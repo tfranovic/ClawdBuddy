@@ -2,6 +2,7 @@
 #include "pet_hooks.h"
 #include "pet_buddy.h"
 #include "pet_stats_core.h"
+#include "team_view.h"
 #include "../ui.h"
 #include "../clawd_policy.h"
 #include <Arduino.h>
@@ -80,6 +81,7 @@ const char* pet_last_tool(void) { return last_tool; }
 void pet_on_payload(const UsageData* d, const SignalsUpdate* sig) {
     if (!d->valid || !d->ok) return;
     if (d->last_tool[0]) snprintf(last_tool, sizeof(last_tool), "%s", d->last_tool);
+    team_view_on_payload(d);
     // A Codex account's numbers are not Claude's (signals reports them as a
     // replay), so they neither feed the pet nor make it dizzy.
     if (!d->codex) usage_full = d->session_pct >= 100.0f;

@@ -735,6 +735,19 @@ impl SettingsView {
                 });
             }),
         ));
+        let me = cx.entity().downgrade();
+        let team = self.settings.team_view;
+        pane = pane.child(field(
+            t,
+            "Agent team view",
+            "Adds a second screen: an office with a desk per session and a person per agent. Tap the left or right side of the screen to switch. Needs the pet firmware and the hooks.",
+            toggle(t, "team-view", team, true, move |_, _, cx| {
+                let _ = me.update(cx, |v, cx| {
+                    v.save(|s, _| s.team_view = !team);
+                    cx.notify();
+                });
+            }),
+        ));
         if let Some(buttons) = self.buttons_field(t, board, cx) {
             pane = pane.child(buttons);
         }

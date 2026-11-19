@@ -262,6 +262,14 @@ void director_tap(int x) {
     if (attention_on) { end_attention(ATTN_END_TAP); return; }   // a dismissing tap does nothing else
     resume_screensaver = false;                   // "show me the meters" wins
     if (minimal) return;
+#ifdef PET_ASCII
+    // The office is on screen: the tap is its own, whatever the pet behind
+    // it is in the middle of (only the screensaver, which covers it, wakes).
+    if (team_view_visible() && beat != B_SCREENSAVER && !pairing_touch) {
+        team_view_tap(x, tap_y);
+        return;
+    }
+#endif
     if (beat == B_HOME || beat == B_CORNER) {
         if (pairing_touch) return;                // the hint is the control now
 #ifdef PET_ASCII

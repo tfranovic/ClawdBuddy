@@ -63,6 +63,36 @@ pub const HOOKS: [HookSpec; 16] = [
     HookSpec { event: "TaskCompleted", matcher: None, args: "team" },
 ];
 
+/// Arguments after `hook` for the status line command.
+pub const STATUS_LINE_ARGS: &str = "statusline";
+
+/// Whose `statusLine` a settings.json has.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StatusLine {
+    /// None.
+    Absent,
+    /// `<a clawdbuddy binary> hook statusline`, with its path as written.
+    Ours(String),
+    /// The user's own: never touched.
+    Foreign,
+}
+
+/// Classify a settings.json's `statusLine`.
+pub fn status_line_of(root: &Map<String, Value>) -> StatusLine {
+    let Some(sl) = root.get("statusLine").filter(|v| !v.is_null()) else { return StatusLine::Absent };
+    let Some((exe, rest)) = sl.get("command").and_then(Value::as_str).and_then(first_word) else {
+        return StatusLine::Foreign;
+    };
+    let base = basename(&exe);
+    let ours = rest.split_whitespace().collect::<Vec<_>>() == ["hook", STATUS_LINE_ARGS]
+        && (base.starts_with("clawdbuddy") || base.starts_with("clawdmeter"));
+    if ours {
+        StatusLine::Ours(exe)
+    } else {
+        StatusLine::Foreign
+    }
+}
+
 /// The binary hooks should run: the path that outlives this process (an
 /// AppImage's copy under `state_dir`, a Nix profile's `bin/clawdbuddy`,
 /// else this executable). See [`clawdbuddy_core::launch::hook_binary`].
@@ -307,6 +337,11 @@ pub fn merge(text: Option<&str>, exe: &Path) -> Result<String, HookError> {
     }
     // Legacy entries on events we no longer use.
     strip_managed(hooks, |event| !HOOKS.iter().any(|s| s.event == event));
+    // The status line, where the context used and the plan's usage come
+    // from: taken when it is free (or already ours), never from the user's own.
+    if status_line_of(&root) != StatusLine::Foreign {
+        root.insert("statusLine".into(), json!({ "type": "command", "command": hook_command(exe, STATUS_LINE_ARGS) }));
+    }
     Ok(render(root))
 }
 
@@ -336,6 +371,9 @@ pub fn remove(text: Option<&str>) -> Result<String, HookError> {
         if hooks.is_empty() {
             root.remove("hooks");
         }
+    }
+    if matches!(status_line_of(&root), StatusLine::Ours(_)) {
+        root.remove("statusLine");
     }
     Ok(render(root))
 }
@@ -409,7 +447,13 @@ pub fn status(text: Option<&str>, exe: &Path) -> HookStatus {
             .filter_map(command_of)
             .any(|c| matches!(owner(c), Owner::Ours { args, .. } if args == spec.args))
     });
-    if complete {
+    // The status line is ours to set unless the user has their own.
+    let line_ok = match status_line_of(&root) {
+        StatusLine::Ours(e) => !stale(&e),
+        StatusLine::Foreign => true,
+        StatusLine::Absent => false,
+    };
+    if complete && line_ok {
         HookStatus::Installed
     } else {
         HookStatus::Partial
@@ -634,7 +678,7 @@ mod tests {
         let out = merge(Some(before), exe()).unwrap();
         let j = v(&out);
         let keys: Vec<_> = j.as_object().unwrap().keys().cloned().collect();
-        assert_eq!(keys, ["model", "hooks"]);
+        assert_eq!(keys, ["model", "hooks", "statusLine"]);
         let post = j["hooks"]["PostToolUse"].as_array().unwrap();
         assert_eq!(post.len(), 2, "migrated in place, no new group");
         assert_eq!(post[0]["hooks"][0]["command"], "prettier --write");
@@ -666,6 +710,27 @@ mod tests {
         assert_eq!(stop[0]["hooks"][0]["command"], format!("{EXE} hook event"));
         assert_eq!(stop[1]["hooks"].as_array().unwrap().len(), 1);
         assert_eq!(stop[1]["hooks"][0]["command"], "say done");
+    }
+
+    #[test]
+    fn the_status_line_is_taken_only_when_free() {
+        let out = merge(None, exe()).unwrap();
+        assert_eq!(v(&out)["statusLine"]["command"], format!("{EXE} hook statusline"));
+        // Without it the install is incomplete; removing takes it out again.
+        let mut j = v(&out);
+        j.as_object_mut().unwrap().remove("statusLine");
+        assert_eq!(status(Some(&j.to_string()), exe()), HookStatus::Partial);
+        assert!(!remove(Some(&out)).unwrap().contains("statusLine"));
+        // The user's own stays, through install and removal, and the
+        // install still counts as whole.
+        let theirs = r#"{"statusLine": {"type": "command", "command": "~/.claude/statusline.sh"}}"#;
+        let out = merge(Some(theirs), exe()).unwrap();
+        assert_eq!(v(&out)["statusLine"]["command"], "~/.claude/statusline.sh");
+        assert_eq!(status(Some(&out), exe()), HookStatus::Installed);
+        assert_eq!(v(&remove(Some(&out)).unwrap())["statusLine"]["command"], "~/.claude/statusline.sh");
+        // One left by an older copy of the app is moved to this one.
+        let old = merge(None, Path::new("/old/place/clawdbuddy")).unwrap();
+        assert_eq!(v(&merge(Some(&old), exe()).unwrap())["statusLine"]["command"], format!("{EXE} hook statusline"));
     }
 
     #[test]

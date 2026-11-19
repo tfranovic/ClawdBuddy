@@ -277,6 +277,9 @@ pub async fn run(paths: Paths, mut commands: mpsc::UnboundedReceiver<Command>, s
             status: clawdbuddy_core::statusline::read_all(&paths.state_dir, now),
             running: clawdbuddy_core::sessions::read_all(&engine.settings().config_dirs),
         };
+        if engine.on_status_usage(now, &beside.status) {
+            log::debug!("usage from a session's status line");
+        }
         engine.set_team(team.poll_with(now, &beside));
         let alert = inbox.take_alert(SystemTime::now());
         let clears = inbox.take_clears();

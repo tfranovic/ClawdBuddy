@@ -158,6 +158,8 @@ pub struct Engine {
     /// The desk the device wants a detail card for.
     detail_want: Option<u8>,
     sent_tx: Option<String>,
+    /// The newest status-line numbers taken as a reading, per account.
+    status_at: HashMap<PathBuf, i64>,
     sent_tm: Option<String>,
     sent_tm_at: i64,
     sent_tv: Option<u8>,
@@ -226,6 +228,7 @@ impl Engine {
             desks: Vec::new(),
             detail_want: None,
             sent_tx: None,
+            status_at: HashMap::new(),
             sent_tm: None,
             sent_tm_at: 0,
             sent_tv: None,
@@ -561,6 +564,68 @@ impl Engine {
         }
         self.in_flight = accounts.clone();
         Some(PollPlan { reason, accounts, plans })
+    }
+
+    /// The usage windows Claude Code handed a session's status line
+    /// ([`crate::statusline`]): the same numbers a poll reads, there after
+    /// every reply at no cost. They update an account that already has a
+    /// reading (which says what kind of plan it is and carries what the
+    /// status line lacks, such as Fable's window); polls go on as before.
+    /// Returns whether any account's numbers changed.
+    pub fn on_status_usage(&mut self, now: i64, numbers: &HashMap<String, crate::statusline::StatusNumbers>) -> bool {
+        let mut changed: Vec<PathBuf> = Vec::new();
+        for dir in self.settings.config_dirs.clone() {
+            let newest = numbers
+                .values()
+                .filter(|n| n.config_dir.as_deref() == Some(dir.as_path()))
+                .filter(|n| n.five_hour.is_some() || n.seven_day.is_some())
+                .max_by_key(|n| n.at);
+            let Some(n) = newest else { continue };
+            if now - n.at > crate::statusline::USAGE_FRESH_SECS || self.status_at.get(&dir).is_some_and(|t| *t >= n.at)
+            {
+                continue;
+            }
+            self.status_at.insert(dir.clone(), n.at);
+            let Some(st) = self.accounts.get_mut(&dir) else { continue };
+            let Some(mut r) = st.last.clone().filter(|r| r.provider == Provider::Claude && r.spend.is_none()) else {
+                continue;
+            };
+            // Within one window usage only rises: a lower figure is an older
+            // one (the status line shows its session's last reply).
+            let newer = |old: Option<&crate::usage::Window>,
+                         w: &crate::statusline::StatusWindow|
+             -> Option<crate::usage::Window> {
+                let resets_at = chrono::DateTime::from_timestamp(w.resets_at, 0).filter(|t| t.timestamp() > now)?;
+                let pct = w.pct.round().clamp(0.0, 999.0) as u32;
+                let same = old.and_then(|o| o.resets_at).is_some_and(|t| (t.timestamp() - w.resets_at).abs() <= 90);
+                (!(same && old.is_some_and(|o| pct <= o.pct)))
+                    .then_some(crate::usage::Window { pct, resets_at: Some(resets_at) })
+            };
+            let before = (r.session.clone(), r.week.clone());
+            if !r.no_session_limit() {
+                if let Some(w) = n.five_hour.as_ref().and_then(|w| newer(r.session.as_ref(), w)) {
+                    r.session = Some(w);
+                }
+            }
+            if let Some(w) = n.seven_day.as_ref().and_then(|w| newer(r.week.as_ref(), w)) {
+                r.week = Some(w);
+            }
+            if before == (r.session.clone(), r.week.clone()) {
+                continue;
+            }
+            st.record_polled(
+                now,
+                probe::Polled { result: Ok(r), idle: false, probe: probe::ProbeRun::NotRun, idle_miss: None },
+            );
+            changed.push(dir);
+        }
+        if changed.is_empty() {
+            return false;
+        }
+        if self.choose_active(now, &changed, &[]) {
+            self.fresh_poll = true;
+        }
+        true
     }
 
     /// Results of one poll (the accounts of a [`PollPlan`]).
@@ -1596,6 +1661,42 @@ mod tests {
         e.on_connected();
         let w = write(&mut e, T0 + 6).unwrap();
         assert_eq!((w.payload.k2, w.payload.k3), (Some(4), Some(0x11310)), "resent on a reconnect");
+    }
+
+    #[test]
+    fn the_status_lines_numbers_move_the_meters_between_polls() {
+        use crate::statusline::{StatusNumbers, StatusWindow};
+        let dir = PathBuf::from("/h/.claude");
+        let mut e = Engine::new(settings(""));
+        let numbers = |at, pct, reset| {
+            HashMap::from([(
+                "s1".to_owned(),
+                StatusNumbers {
+                    at,
+                    five_hour: Some(StatusWindow { pct, resets_at: reset }),
+                    config_dir: Some(PathBuf::from("/h/.claude")),
+                    ..StatusNumbers::default()
+                },
+            )])
+        };
+        // Nothing to update before the first poll says what plan this is.
+        assert!(!e.on_status_usage(T0, &numbers(T0, 40.0, T0 + 3600)));
+        e.on_poll_results(T0, vec![(dir.clone(), Ok(reading(15)))]);
+        let reset = e.accounts[&dir].last.as_ref().unwrap().session.as_ref().unwrap().resets_at.unwrap().timestamp();
+        write(&mut e, T0).unwrap();
+        assert!(e.on_status_usage(T0 + 30, &numbers(T0 + 30, 22.4, reset)));
+        let w = write(&mut e, T0 + 30).expect("a fresh reading goes out");
+        assert_eq!((w.kind, w.payload.s), (WriteKind::Poll, Some(22)));
+        // The same file again, a lower figure for the same window, and
+        // numbers too old to trust change nothing.
+        assert!(!e.on_status_usage(T0 + 31, &numbers(T0 + 30, 50.0, reset)));
+        assert!(!e.on_status_usage(T0 + 40, &numbers(T0 + 40, 18.0, reset)));
+        assert!(!e.on_status_usage(T0 + 900, &numbers(T0 + 41, 60.0, reset)));
+        assert_eq!(e.accounts[&dir].last.as_ref().unwrap().session.as_ref().unwrap().pct, 22);
+        // Another account's sessions are not this one's.
+        let mut other = numbers(T0 + 50, 70.0, reset);
+        other.get_mut("s1").unwrap().config_dir = Some(PathBuf::from("/h/.claude-work"));
+        assert!(!e.on_status_usage(T0 + 50, &other));
     }
 
     fn team(tm: &str) -> crate::team::Team {

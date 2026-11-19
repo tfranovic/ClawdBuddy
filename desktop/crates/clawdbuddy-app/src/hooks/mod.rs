@@ -75,6 +75,7 @@ impl Mode {
             Some("event") => Action::Event,
             Some("team") => Action::Team,
             Some("tool") => Action::Tool,
+            Some("statusline") => Action::StatusLine,
             _ => Action::None,
         };
         Mode { action, log_too: args.get(1).map(String::as_str) == Some("event") }
@@ -437,6 +438,25 @@ fn touch_clear(v: &Value, dir: &Path) -> io::Result<()> {
     f.set_modified(SystemTime::now())
 }
 
+/// `clawdbuddy hook statusline`, Claude Code's `statusLine` command: keep
+/// the session's numbers for the app (`clawdbuddy_core::statusline`) and
+/// return the line to show. Unlike a hook, what this prints is what the
+/// user sees under the prompt.
+pub fn status_line(input: &str, state_dir: &Path, now_unix: u64) -> String {
+    use clawdbuddy_core::statusline;
+    let Ok(v) = serde_json::from_str::<Value>(input) else { return String::new() };
+    if let Some((sid, body)) = statusline::digest(&v, i64::try_from(now_unix).unwrap_or(0)) {
+        let dir = statusline::dir(state_dir);
+        if fs::create_dir_all(&dir).is_ok() {
+            let tmp = dir.join(format!("{sid}.{}", std::process::id()));
+            if fs::write(&tmp, body).and_then(|()| fs::rename(&tmp, dir.join(format!("{sid}.json")))).is_err() {
+                let _ = fs::remove_file(&tmp);
+            }
+        }
+    }
+    statusline::line(&v)
+}
+
 /// Entry point for `clawdbuddy hook …`: read stdin, run, never fail.
 pub fn main(args: &[String]) -> i32 {
     use std::io::{IsTerminal as _, Read as _};
@@ -453,6 +473,10 @@ pub fn main(args: &[String]) -> i32 {
         paths.adopt_legacy();
         let state = paths.state_dir;
         let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+        if mode.action == Action::StatusLine {
+            println!("{}", status_line(&input, &state, now));
+            return 0;
+        }
         run(mode, &input, &state, now);
     }
     0

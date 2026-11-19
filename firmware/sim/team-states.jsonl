@@ -1,0 +1,7 @@
+# The office's finer states (`tx`): done, stopped on an error, compacting,
+# thinking (the gears), plan mode at the board, and the context used as a
+# stack of paper. The tap at 10 s opens a desk's detail card (`td` fills it).
+#   SIM_FAST=1 SIM_SCENARIO=sim/team-states.jsonl SIM_TAPS="3000@440,300;10000@80,170;20500@240,440" .pio/build/sim/program
+{"name":"six desks","hold_ms":11000,"s":45.0,"sr":120,"w":28.0,"wr":7200,"st":"allowed","ok":true,"acct":"pro","t":1785474000,"tf":24,"a":2,"n":6,"tv":1,"tm":"a3w20Fix login|07t00ClawdBuddy|13i00api-server|2bi00docs|31t10Refactor db|44d20Plan release","tx":"wk-fti-oftpsez-hc9-fd3pf"}
+{"name":"a card","hold_ms":9000,"s":45.0,"sr":120,"w":28.0,"wr":7200,"st":"allowed","ok":true,"acct":"pro","t":1785474011,"tf":24,"a":2,"n":6,"tv":1,"tm":"a3w20Fix login|07t00ClawdBuddy|13i00api-server|2bi00docs|31t10Refactor db|44d20Plan release","tx":"wk-fti-oftpsez-hc9-fd3pf","td":"a3|Fix the login page redirect|Working 3m - Bash|Fable 5.2 - context 57%|Sub-agents: 1 code-reviewer, 1 tester|TestApp - tasks 3/7"}
+{"name":"limit","hold_ms":9000,"s":100.0,"sr":42,"w":31.0,"wr":7190,"st":"limited","ok":true,"acct":"pro","t":1785474020,"tf":24,"a":0,"n":6,"tv":1,"tm":"a3i00Fix login|07i00ClawdBuddy|13i00api-server|2bb00docs|31i00Refactor db|44i00Plan release","tx":"ek-fez-ofz-sb--hf9-ff3pf"}

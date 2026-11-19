@@ -15,6 +15,9 @@ static inline void team_view_init(lv_obj_t*, int) {}
 void team_view_init(lv_obj_t* scr, int home_bottom);   // ui.cpp, once
 void team_view_on_payload(const UsageData* d);
 void team_view_alert(const char* msg);                 // NULL or "": none
+// The link's state, from ui.cpp: 0 not connected, 1 connected but no fresh
+// data, 2 live. Anything but live shuts the office.
+void team_view_link(int state);
 bool team_view_visible(void);
 // A tap on the meters or on the office. True when it was the view's (a
 // switch, or a spot that does nothing); false leaves it to the pet's peek.

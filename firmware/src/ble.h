@@ -21,6 +21,7 @@ bool ble_has_data(void);
 const char* ble_get_data(void);
 void ble_send_ack(void);
 void ble_send_nack(void);
+void ble_send_desk(uint8_t id);  // TX {"desk":"a3"}: the team view wants this desk's detail card
 void ble_send_dismiss(void);   // TX {"dismiss":true}: the user ended the alert on the device
 void ble_request_refresh(void);
 

@@ -13,6 +13,11 @@
 // its sub-agents, i idle,
 // b idle for a while (on a break). `quiet` is how many of the sub-agents
 // have done nothing for a while.
+//
+// `tx` adds four characters per desk, in the same order: the finer state
+// (those six, and c compacting, f turn finished, e stopped on an error), the
+// context used (0-9 a-z: thirty-fifths of the window, - unknown), the
+// permission mode (p plan, - default) and the model.
 
 #define TEAM_W      480
 #define TEAM_H      480
@@ -32,7 +37,12 @@ typedef struct {
     uint8_t subs;
     uint8_t quiet;
     char    name[TEAM_NAME];
+    int8_t  ctx;      // context used, 0..TEAM_CTX_FULL; -1 unknown
+    char    mode;     // permission mode: 'p' plan, '-' default, ...
+    char    model;    // 'f' 'o' 's' 'h' ..., '-' unknown
 } TeamDeskIn;
+
+#define TEAM_CTX_FULL 35
 
 // Where a person is in their day.
 typedef enum {
@@ -55,11 +65,17 @@ typedef struct {
     char        state;
     int         more;        // sub-agents beyond the bench's seats
     int         name_cx, name_y;   // the name: centre x, top y
+    uint8_t     id;
+    int         ctx;         // context used, 0..TEAM_CTX_FULL; -1 unknown
+    char        mode;
 } TeamDeskInfo;
 
 // Parse `tm` into at most `max` desks; returns the count. Malformed entries
 // are skipped.
 int  team_parse(const char* tm, TeamDeskIn* out, int max);
+// Apply `tx` to the `n` desks team_parse read. Too short, or with a letter
+// it doesn't know, a desk keeps what `tm` said.
+void team_parse_extra(const char* tx, TeamDeskIn* in, int n);
 
 void team_reset(void);
 // The sessions now in, in desk order: new ones walk in, missing ones walk
@@ -71,6 +87,17 @@ void team_step(uint32_t dt_ms);
 // The wall clock: seconds since local midnight, or -1 for no hands.
 void team_set_time(long seconds);
 void team_render(uint16_t* buf, int office);   // TEAM_W * TEAM_H pixels
+// A second TEAM_W * TEAM_H buffer to keep the room's fixed parts in, so a
+// frame copies them instead of drawing them. NULL: draw them every frame.
+void team_set_cache(uint16_t* buf);
+// No word from the computer: the office is shown shut, lights off, nobody in.
+void team_set_dark(bool dark);
+bool team_dark(void);
+// The live desk under a point of an office's picture (the desk itself, not
+// its bench or its name), or -1.
+int  team_desk_at(int office, int x, int y);
+// The first office with a session waiting for you, or -1.
+int  team_office_waiting(void);
 
 void      team_desk_info(int office, int desk, TeamDeskInfo* out);
 int       team_per_office(void);       // 6 desks or 4 cubicles

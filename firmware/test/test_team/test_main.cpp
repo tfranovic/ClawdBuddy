@@ -16,6 +16,14 @@ static void set(const char* tm) {
     team_set(in, team_parse(tm, in, TEAM_MAX));
 }
 
+// With `tx` too, as the app sends it.
+static void setx(const char* tm, const char* tx) {
+    TeamDeskIn in[TEAM_MAX];
+    const int n = team_parse(tm, in, TEAM_MAX);
+    team_parse_extra(tx, in, n);
+    team_set(in, n);
+}
+
 static void run(uint32_t ms) {
     for (uint32_t t = 0; t < ms; t += 100) team_step(100);
 }
@@ -56,13 +64,23 @@ static void test_thinking_goes_to_the_board_and_back(void) {
     set("01w00api");
     team_snap();
     set("01t00api");
-    run(2000);
+    run(5000);
     TEST_ASSERT_EQUAL(TEAM_SEAT, team_lead_phase(0));     // a short thought stays seated
     run(2000);
     TEST_ASSERT_EQUAL(TEAM_TO_BOARD, team_lead_phase(0));
-    run(15000);
+    run(4000);
     TEST_ASSERT_EQUAL(TEAM_BOARD, team_lead_phase(0));
+    // Not there and straight back: it stays a few seconds at least.
     set("01w00api");
+    run(200);
+    TEST_ASSERT_EQUAL(TEAM_BOARD, team_lead_phase(0));
+    run(15000);
+    TEST_ASSERT_EQUAL(TEAM_SEAT, team_lead_phase(0));
+    // Someone asking for it brings it back at once.
+    set("01t00api");
+    run(12000);
+    TEST_ASSERT_EQUAL(TEAM_BOARD, team_lead_phase(0));
+    set("01q00api");
     run(200);
     TEST_ASSERT_EQUAL(TEAM_RETURN, team_lead_phase(0));
     run(15000);
@@ -239,12 +257,91 @@ static void test_cubicle_render_stays_in_bounds(void) {
 static void test_render_stays_in_bounds(void) {
     static uint16_t buf[TEAM_W * TEAM_H + 16];
     memset(buf, 0xAB, sizeof(buf));
-    set("01w90abcdefghijkl|02t40b|03q00c|04i00d|05w20e|06t10f|07d40g|08b00h|09w42i");
+    setx("01w90abcdefghijkl|02t40b|03q00c|04i00d|05w20e|06t10f|07d40g|08b00h|09w42i", "wz--c9--q0--f5--e---tk--d---b---w-p-");
     for (int i = 0; i < 600; i++) {
         team_step(100);
         team_render(buf, i % 2);
     }
     for (int i = 0; i < 16; i++) TEST_ASSERT_EQUAL_HEX16(0xABAB, buf[TEAM_W * TEAM_H + i]);
+}
+
+static void test_the_finer_states_and_the_context(void) {
+    TeamDeskIn in[TEAM_DESKS];
+    TEST_ASSERT_EQUAL(3, team_parse("01i00a|02t00b|03w00c", in, TEAM_DESKS));
+    TEST_ASSERT_EQUAL(-1, in[0].ctx);
+    team_parse_extra("f0pfc9--wz-o", in, 3);
+    TEST_ASSERT_EQUAL_CHAR('f', in[0].state);
+    TEST_ASSERT_EQUAL(0, in[0].ctx);
+    TEST_ASSERT_EQUAL_CHAR('p', in[0].mode);
+    TEST_ASSERT_EQUAL_CHAR('c', in[1].state);
+    TEST_ASSERT_EQUAL(9, in[1].ctx);
+    TEST_ASSERT_EQUAL(TEAM_CTX_FULL, in[2].ctx);
+    // Too short for the third desk, an unknown state letter, no context:
+    // `tm` stands.
+    team_parse("01i00a|02t00b|03w00c", in, TEAM_DESKS);
+    team_parse_extra("X---e---w", in, 3);
+    TEST_ASSERT_EQUAL_CHAR('i', in[0].state);
+    TEST_ASSERT_EQUAL_CHAR('e', in[1].state);
+    TEST_ASSERT_EQUAL_CHAR('w', in[2].state);
+    TEST_ASSERT_EQUAL(-1, in[2].ctx);
+    team_parse_extra(NULL, in, 3);
+
+    // Done, failed and compacting all stay at the desk.
+    setx("01i00a|02i00b|03t00c", "fk--e---c5--");
+    team_snap();
+    run(20000);
+    for (int slot = 0; slot < 3; slot++) TEST_ASSERT_EQUAL(TEAM_SEAT, team_lead_phase(slot));
+    TeamDeskInfo d;
+    team_desk_info(0, 0, &d);
+    TEST_ASSERT_EQUAL_CHAR('f', d.state);
+    TEST_ASSERT_EQUAL(20, d.ctx);
+    TEST_ASSERT_EQUAL_UINT8(0x01, d.id);
+    // Plan mode: the work is at the board.
+    setx("01w00a", "w-p-");
+    run(12000);
+    TEST_ASSERT_EQUAL(TEAM_BOARD, team_lead_phase(0));
+}
+
+static void test_taps_find_desks_and_alerts_find_offices(void) {
+    set("01w00a|02w00b|03w00c|04w00d|05w00e|06w00f|07q00g");
+    team_snap();
+    TEST_ASSERT_EQUAL(1, team_office_waiting());
+    TEST_ASSERT_EQUAL(0, team_desk_at(0, 80, 170));      // the first desk
+    TEST_ASSERT_EQUAL(4, team_desk_at(0, 240, 330));     // the middle of the second row
+    TEST_ASSERT_EQUAL(-1, team_desk_at(0, 80, 40));      // the wall
+    TEST_ASSERT_EQUAL(-1, team_desk_at(0, 80, 260));     // a bench and a name
+    TEST_ASSERT_EQUAL(0, team_desk_at(1, 80, 170));
+    TEST_ASSERT_EQUAL(-1, team_desk_at(1, 240, 170));    // an empty desk
+    set("01w00a");
+    TEST_ASSERT_EQUAL(-1, team_office_waiting());
+}
+
+static void test_a_shut_office_draws_nobody(void) {
+    static uint16_t lit[TEAM_W * TEAM_H], shut[TEAM_W * TEAM_H], room[TEAM_W * TEAM_H];
+    setx("01w20a|02q00b", "wz--q5--");
+    team_snap();
+    team_render(lit, 0);
+    team_set_dark(true);
+    TEST_ASSERT_TRUE(team_dark());
+    TEST_ASSERT_EQUAL(-1, team_desk_at(0, 80, 170));
+    team_render(shut, 0);
+    TEST_ASSERT_TRUE(memcmp(lit, shut, sizeof(lit)) != 0);
+    // The same picture whoever was in: nothing of them is drawn.
+    team_reset();
+    team_set_dark(true);
+    team_render(room, 0);
+    TEST_ASSERT_EQUAL_MEMORY(room, shut, sizeof(room));
+    team_set_dark(false);
+    // With the room's fixed parts kept in a cache, the picture is the same.
+    static uint16_t cache[TEAM_W * TEAM_H], cached[TEAM_W * TEAM_H];
+    setx("01w20a|02q00b", "wz--q5--");
+    team_snap();
+    team_render(lit, 0);
+    team_set_cache(cache);
+    team_render(cached, 0);
+    team_render(cached, 0);
+    TEST_ASSERT_EQUAL_MEMORY(lit, cached, sizeof(lit));
+    team_set_cache(NULL);
 }
 
 int main(int, char**) {
@@ -261,5 +358,8 @@ int main(int, char**) {
     RUN_TEST(test_cubicles_seat_four_to_an_office);
     RUN_TEST(test_cubicle_render_stays_in_bounds);
     RUN_TEST(test_render_stays_in_bounds);
+    RUN_TEST(test_the_finer_states_and_the_context);
+    RUN_TEST(test_taps_find_desks_and_alerts_find_offices);
+    RUN_TEST(test_a_shut_office_draws_nobody);
     return UNITY_END();
 }

@@ -49,6 +49,14 @@ static const uint16_t C_COOLER_D= RGB(176, 180, 184);
 static const uint16_t C_WATER   = RGB(120, 190, 235);
 static const uint16_t C_WATER_HI= RGB(190, 228, 250);
 static const uint16_t C_WHITE   = 0xFFFF;
+static const uint16_t C_PAPER   = RGB(244, 241, 232);
+static const uint16_t C_PAPER_E = RGB(196, 190, 176);
+static const uint16_t C_DONE    = RGB(110, 200, 120);
+static const uint16_t C_FAIL    = RGB(232, 92, 80);
+static const uint16_t C_GEAR    = RGB(214, 208, 196);
+static const uint16_t C_GEAR_2  = RGB(150, 160, 176);
+static const int32_t  THINK_WALK_MS = 6000;   // thinking this long before the walk to the board
+static const int32_t  BOARD_STAY_MS = 4000;   // and there at least this long
 
 static const uint16_t SHIRT[TEAM_DESKS] = {
     RGB(217, 119, 87), RGB(91, 155, 213), RGB(107, 191, 115),
@@ -70,6 +78,7 @@ typedef struct {
     int32_t timer_ms;              // a sub's next trip to the board, or its stay there
     bool    walking;
     float   dist;                  // walked so far: the stride
+    int16_t wait_ms;               // stood aside for someone this long
 } Actor;
 
 // A session. Its desk is `slot`: sessions sit in the order the app sends
@@ -79,10 +88,12 @@ typedef struct {
     uint8_t id;
     uint8_t slot;
     uint8_t color;
-    char    state;
+    char    state;                 // the finer one (`tx`)
+    int8_t  ctx;
+    char    mode;
     uint8_t subs_want, quiet;
     char    name[TEAM_NAME];
-    int32_t think_ms;              // how long the state has been `t`
+    int32_t think_ms;              // how long the state has been what it is
     Actor   lead;
     Actor   sub[TEAM_SEATS];
 } Desk;
@@ -100,6 +111,9 @@ static long     wall_secs = -1;
 static uint32_t rnd(void) { rng = rng * 1664525u + 1013904223u; return rng >> 8; }
 
 static uint8_t  skin = TEAM_SKIN_DESKS;
+static bool     dark = false;
+static uint16_t* cache = NULL;
+static int      cache_key = -1;
 static uint32_t style_seed = 0;
 
 static int per_office(void) { return skin == TEAM_SKIN_CUBICLES ? TEAM_CUBICLES : TEAM_DESKS; }
@@ -200,12 +214,31 @@ int team_parse(const char* tm, TeamDeskIn* out, int max) {
             if (k > TEAM_NAME - 1) k = TEAM_NAME - 1;
             memcpy(d->name, p + 5, k);
             d->name[k] = '\0';
+            d->ctx = -1;
+            d->mode = '-';
+            d->model = '-';
         }
         if (!end) break;
         p = end + 1;
     }
     return n;
 }
+
+void team_parse_extra(const char* tx, TeamDeskIn* in, int n) {
+    if (!tx) return;
+    const size_t len = strlen(tx);
+    for (int i = 0; i < n && (size_t)(i * 4 + 4) <= len; i++) {
+        const char* p = tx + i * 4;
+        if (strchr("wtqdcfeib", p[0])) in[i].state = p[0];
+        if (p[1] >= '0' && p[1] <= '9') in[i].ctx = (int8_t)(p[1] - '0');
+        else if (p[1] >= 'a' && p[1] <= 'z') in[i].ctx = (int8_t)(p[1] - 'a' + 10);
+        in[i].mode = p[2];
+        in[i].model = p[3];
+    }
+}
+
+// Busy enough for the sub-agents' screens to be lit and for them to wander.
+static bool busy_state(char s) { return s == 'w' || s == 't' || s == 'd' || s == 'c'; }
 
 // ──────────────── people ────────────────
 static bool present(const Actor* a) { return a->phase != TEAM_OFF && a->phase != TEAM_LEAVE; }
@@ -261,7 +294,10 @@ static void enter(Actor* a, const Desk* d, int who) {
     a->x = (float)DOOR_X;
     a->y = (float)HALL_Y;
     a->small = who >= 0;
-    a->look = (uint8_t)(rnd() % 36);
+    // The same session is the same person every time it comes in.
+    uint32_t h = (uint32_t)d->id * 2654435761u + (uint32_t)(who + 2) * 40503u;
+    h ^= h >> 13;
+    a->look = (uint8_t)((h >> 4) % 36);
     const uint16_t s = SHIRT[d->color];
     // Sub-agents wear a lighter shade of their lead's colour.
     a->shirt = who < 0 ? s
@@ -290,8 +326,31 @@ static void move_desk(Desk* d, int slot) {
     }
 }
 
+// Someone else on their feet is right here and goes first: the one earlier
+// in the list. Two people never stand aside for each other.
+static bool must_yield(const Actor* a) {
+    for (int i = 0; i < TEAM_MAX; i++) {
+        if (!desks[i].used) continue;
+        for (int who = -1; who < TEAM_SEATS; who++) {
+            const Actor* o = who < 0 ? &desks[i].lead : &desks[i].sub[who];
+            if (o >= a) continue;
+            if (o->office != a->office || !o->walking) continue;
+            const float dx = o->x - a->x, dy = o->y - a->y;
+            if (dx > -13 && dx < 13 && dy > -10 && dy < 10) return true;
+        }
+    }
+    return false;
+}
+
 // Move along the path; true when the last waypoint is reached.
 static bool walk(Actor* a, float dist) {
+    // A moment's pause lets the other get ahead; then on regardless.
+    if (a->wp_i < a->wp_n && must_yield(a) && a->wait_ms < 600) {
+        a->wait_ms = (int16_t)(a->wait_ms + (int)(dist * 1000.0f / SPEED));
+        a->walking = false;
+        return false;
+    }
+    if (!must_yield(a)) a->wait_ms = 0;
     a->walking = false;
     while (a->wp_i < a->wp_n && dist > 0) {
         const float tx = a->wp[a->wp_i][0], ty = a->wp[a->wp_i][1];
@@ -369,6 +428,13 @@ static int subs_present(const Desk* d) {
     return n;
 }
 
+// The lead belongs at the whiteboard: a thought that has lasted, or a plan
+// being made (plan mode), which is board work whatever the tool.
+static bool wants_board(const Desk* d) {
+    if (d->state == 't') return d->think_ms > THINK_WALK_MS;
+    return d->mode == 'p' && d->state == 'w' && d->think_ms > THINK_WALK_MS;
+}
+
 static void step_actor(Actor* a, int who, const Desk* d, uint32_t dt) {
     if (a->phase == TEAM_OFF) return;
     const float dist = SPEED * dt / 1000.0f;
@@ -390,7 +456,7 @@ static void step_actor(Actor* a, int who, const Desk* d, uint32_t dt) {
         if (walk(a, dist)) {
             a->phase = TEAM_BOARD;
             a->walking = false;
-            if (who >= 0) a->timer_ms = 5000 + (int32_t)(rnd() % 5000);
+            a->timer_ms = who >= 0 ? 5000 + (int32_t)(rnd() % 5000) : BOARD_STAY_MS;
         }
         break;
     case TEAM_TO_COOLER:
@@ -401,9 +467,11 @@ static void step_actor(Actor* a, int who, const Desk* d, uint32_t dt) {
         break;
     case TEAM_BOARD: {
         // The lead stays while it thinks; a sub-agent for a few seconds.
+        // Not straight back, though, unless someone is asking for them.
         bool back = d->closing;
-        if (who < 0) back = back || d->state != 't';
-        else { a->timer_ms -= (int32_t)dt; back = back || a->timer_ms <= 0; }
+        a->timer_ms -= (int32_t)dt;
+        if (who < 0) back = back || (!wants_board(d) && (a->timer_ms <= 0 || d->state == 'q'));
+        else back = back || a->timer_ms <= 0;
         if (back) {
             go_seat(a, slot, who, TEAM_RETURN);
             if (who >= 0) a->timer_ms = 25000 + (int32_t)(rnd() % 40000);
@@ -420,7 +488,7 @@ static void step_actor(Actor* a, int who, const Desk* d, uint32_t dt) {
             if (d->state == 'b') {
                 stand_spot(a, a->office, true, false, &x, &y);
                 go_spot(a, aisle, x, y, TEAM_TO_COOLER);
-            } else if (d->state == 't' && d->think_ms > 3000) {
+            } else if (wants_board(d)) {
                 // A thought that lasts takes the lead to the board.
                 stand_spot(a, a->office, false, false, &x, &y);
                 go_spot(a, aisle, x, y, TEAM_TO_BOARD);
@@ -429,7 +497,7 @@ static void step_actor(Actor* a, int who, const Desk* d, uint32_t dt) {
             int x, y;
             stand_spot(a, a->office, true, true, &x, &y);
             go_spot(a, aisle, x, y, TEAM_TO_COOLER);
-        } else if (d->state == 'w' || d->state == 't' || d->state == 'd') {
+        } else if (busy_state(d->state)) {
             a->timer_ms -= (int32_t)dt;
             if (a->timer_ms <= 0) {
                 int x, y;
@@ -445,6 +513,7 @@ static void step_actor(Actor* a, int who, const Desk* d, uint32_t dt) {
 // ──────────────── the offices ────────────────
 void team_reset(void) {
     memset(desks, 0, sizeof(desks));
+    dark = false;
     stroke_n = 0;
     stroke_ms = 0;
     clock_ms = 0;
@@ -468,11 +537,13 @@ static Desk* free_desk(void) {
 }
 
 // The shirt colour fewest sessions wear.
-static uint8_t pick_color(void) {
+// The session's own colour (from its id) when no other is worn less, so it
+// usually wears the same one each time.
+static uint8_t pick_color(uint8_t id) {
     int count[TEAM_DESKS] = { 0 };
     for (int i = 0; i < TEAM_MAX; i++) if (desks[i].used && !desks[i].closing) count[desks[i].color]++;
-    int best = 0;
-    for (int c = 1; c < TEAM_DESKS; c++) if (count[c] < count[best]) best = c;
+    int best = id % TEAM_DESKS;
+    for (int c = 0; c < TEAM_DESKS; c++) if (count[c] < count[best]) best = c;
     return (uint8_t)best;
 }
 
@@ -498,7 +569,7 @@ void team_set(const TeamDeskIn* in, int n) {
             d = free_desk();
             if (!d) continue;
             memset(d, 0, sizeof(*d));
-            d->color = pick_color();
+            d->color = pick_color(in[k].id);
             d->used = true;
             d->id = in[k].id;
             d->slot = (uint8_t)k;
@@ -508,6 +579,8 @@ void team_set(const TeamDeskIn* in, int n) {
         }
         if (d->state != in[k].state) d->think_ms = 0;
         d->state = in[k].state;
+        d->ctx = in[k].ctx;
+        d->mode = in[k].mode;
         d->subs_want = in[k].subs;
         memcpy(d->name, in[k].name, TEAM_NAME);
         d->name[TEAM_NAME - 1] = '\0';
@@ -573,7 +646,7 @@ void team_step(uint32_t dt) {
     for (int i = 0; i < TEAM_MAX; i++) {
         Desk* d = &desks[i];
         if (!d->used) continue;
-        if (d->state == 't') d->think_ms += (int32_t)dt;
+        if (d->think_ms < 3600000) d->think_ms += (int32_t)dt;
         step_actor(&d->lead, -1, d, dt);
         for (int s = 0; s < TEAM_SEATS; s++) step_actor(&d->sub[s], s, d, dt);
         if (d->lead.phase == TEAM_BOARD) { at_board = true; pen = d->lead.shirt; }
@@ -612,6 +685,31 @@ int team_standing(int office, int* xs, int* ys, int max) {
         }
     }
     return n;
+}
+
+void team_set_cache(uint16_t* buf) { cache = buf; cache_key = -1; }
+void team_set_dark(bool on) { dark = on; }
+bool team_dark(void) { return dark; }
+
+int team_desk_at(int office, int x, int y) {
+    if (dark) return -1;
+    for (int i = 0; i < per_office(); i++) {
+        const int slot = office * per_office() + i;
+        if (!at_slot(slot, false)) continue;
+        const int cx = desk_cx(slot), top = desk_top(slot);
+        if (x >= cx - 52 && x <= cx + 52 && y >= top - 8 && y <= top + 66) return i;
+    }
+    return -1;
+}
+
+int team_office_waiting(void) {
+    int best = -1;
+    for (int i = 0; i < TEAM_MAX; i++) {
+        if (!desks[i].used || desks[i].closing || desks[i].state != 'q') continue;
+        const int o = desks[i].slot / per_office();
+        if (best < 0 || o < best) best = o;
+    }
+    return best;
 }
 
 int team_bar_y(void) { return BAR_Y; }
@@ -654,6 +752,7 @@ int team_subs_at_cooler(int slot) {
 void team_desk_info(int office, int desk, TeamDeskInfo* out) {
     memset(out, 0, sizeof(*out));
     out->name = "";
+    out->ctx = -1;
     if (desk < 0 || desk >= per_office()) return;
     const int slot = office * per_office() + desk;
     out->name_cx = desk_cx(slot);
@@ -666,6 +765,9 @@ void team_desk_info(int office, int desk, TeamDeskInfo* out) {
     const Desk* d = at_slot(slot, false);
     if (!d) return;
     out->live = true;
+    out->id = d->id;
+    out->ctx = d->ctx;
+    out->mode = d->mode;
     out->name = d->name;
     out->state = d->state;
     out->more = d->subs_want > TEAM_SEATS ? d->subs_want - TEAM_SEATS : 0;
@@ -819,7 +921,8 @@ static void person(const Actor* a, Pose pose) {
 
 static void draw_partitions(void);
 
-static void draw_room(int office) {
+// The parts of the room that never change (kept in the cache when there is one).
+static void draw_room_fixed(void) {
     rect(0, 0, TEAM_W, WALL_H, C_WALL);
     rect(0, 0, TEAM_W, 8, C_WALL_T);
     for (int ty = 0; ty * 40 + WALL_H < TEAM_H; ty++)
@@ -843,45 +946,20 @@ static void draw_room(int office) {
         const float a = h * 0.5235988f;
         disc(104 + sinf(a) * 11, 38 - cosf(a) * 11, h % 3 ? 0.7f : 1.1f, C_FRAME);
     }
-    if (wall_secs >= 0) {
-        const float m = (wall_secs % 3600) / 3600.0f * 6.2831853f;
-        const float h = (wall_secs % 43200) / 43200.0f * 6.2831853f;
-        hand(104, 38, h, 6.5f, 1.3f, C_DARK);
-        hand(104, 38, m, 10.0f, 0.9f, C_DARK);
-    }
-    disc(104, 38, 1.6f, C_ALERT);
 
-    // The whiteboard and what has been written on it.
+    // The whiteboard.
     rrect(BOARD_X0 - 4, BOARD_Y0 - 4, BOARD_X1 - BOARD_X0 + 8, BOARD_Y1 - BOARD_Y0 + 8, 4, C_FRAME);
     rect(BOARD_X0, BOARD_Y0, BOARD_X1 - BOARD_X0, BOARD_Y1 - BOARD_Y0, C_BOARD);
     rrect(BOARD_X0 + 50, BOARD_Y1 + 4, 60, 4, 2, C_BASE);
     rect(BOARD_X0 + 58, BOARD_Y1 + 1, 10, 3, SHIRT[0]);
     rect(BOARD_X0 + 72, BOARD_Y1 + 1, 10, 3, SHIRT[1]);
     rect(BOARD_X0 + 86, BOARD_Y1 + 1, 10, 3, SHIRT[2]);
-    for (int i = 0; i < stroke_n; i++) {
-        int len = strokes[i].len;
-        if (strokes[i].x + len > BOARD_X1 - 8) len = BOARD_X1 - 8 - strokes[i].x;
-        rrect(strokes[i].x, strokes[i].y, len, 2, 1, strokes[i].color);
-    }
 
-    // The water cooler: a bottle on a stand; it bubbles when someone is there.
-    bool company = false;
-    for (int i = 0; i < TEAM_MAX; i++) {
-        if (!desks[i].used) continue;
-        for (int who = -1; who < TEAM_SEATS; who++) {
-            const Actor* a = who < 0 ? &desks[i].lead : &desks[i].sub[who];
-            company = company || (a->phase == TEAM_COOLER && a->office == office);
-        }
-    }
+    // The water cooler: a bottle on a stand.
     oval(COOLER_X, WALL_H + 1, 16, 4, C_DARK, 90);
     rrect(COOLER_X - 11, 12, 22, 30, 7, C_WATER);
     rrect(COOLER_X - 8, 15, 4, 22, 2, C_WATER_HI);
     rect(COOLER_X - 5, 40, 10, 4, C_WATER);
-    if (company) {
-        const int t = (int)(clock_ms % 1800);
-        disc(COOLER_X + 3, 38 - t / 80.0f, 1.8f, C_WATER_HI);
-        disc(COOLER_X - 1, 38 - ((t + 900) % 1800) / 80.0f, 1.3f, C_WATER_HI);
-    }
     rrect(COOLER_X - 14, 42, 28, WALL_H - 42, 4, C_COOLER);
     rect(COOLER_X - 14, 44, 28, 3, C_COOLER_D);
     rrect(COOLER_X - 9, 52, 18, 12, 2, C_COOLER_D);
@@ -898,6 +976,82 @@ static void draw_room(int office) {
     disc(PLANT_X - 3, 42, 7, C_LEAF);
     rrect(PLANT_X - 11, 56, 22, WALL_H - 56, 4, C_POT);
     rect(PLANT_X - 13, 56, 26, 5, mix(C_POT, C_WHITE, 50));
+}
+
+// What changes on the wall: the clock's hands, the writing on the board,
+// the cooler's bubbles when someone is at it.
+static void draw_room_live(int office) {
+    if (wall_secs >= 0) {
+        const float m = (wall_secs % 3600) / 3600.0f * 6.2831853f;
+        const float h = (wall_secs % 43200) / 43200.0f * 6.2831853f;
+        hand(104, 38, h, 6.5f, 1.3f, C_DARK);
+        hand(104, 38, m, 10.0f, 0.9f, C_DARK);
+    }
+    disc(104, 38, 1.6f, C_ALERT);
+    for (int i = 0; i < stroke_n; i++) {
+        int len = strokes[i].len;
+        if (strokes[i].x + len > BOARD_X1 - 8) len = BOARD_X1 - 8 - strokes[i].x;
+        rrect(strokes[i].x, strokes[i].y, len, 2, 1, strokes[i].color);
+    }
+    bool company = false;
+    for (int i = 0; i < TEAM_MAX; i++) {
+        if (!desks[i].used) continue;
+        for (int who = -1; who < TEAM_SEATS; who++) {
+            const Actor* a = who < 0 ? &desks[i].lead : &desks[i].sub[who];
+            company = company || (a->phase == TEAM_COOLER && a->office == office);
+        }
+    }
+    if (company && !dark) {
+        const int t = (int)(clock_ms % 1800);
+        disc(COOLER_X + 3, 38 - t / 80.0f, 1.8f, C_WATER_HI);
+        disc(COOLER_X - 1, 38 - ((t + 900) % 1800) / 80.0f, 1.3f, C_WATER_HI);
+    }
+}
+
+// A gear: teeth round a disc with a hole, turned by `angle`.
+static void gear(float cx, float cy, float r, int teeth, float angle, uint16_t c, uint16_t hole) {
+    for (int k = 0; k < teeth; k++) {
+        const float a = angle + k * 6.2831853f / teeth;
+        disc(cx + cosf(a) * r * 0.92f, cy + sinf(a) * r * 0.92f, r * 0.27f, c);
+    }
+    disc(cx, cy, r * 0.8f, c);
+    disc(cx, cy, r * 0.3f, hole);
+}
+
+// Thinking: a larger and a smaller gear, meshed, turning against each other.
+static void gears(int x, int y) {
+    const float a = clock_ms / 520.0f;
+    gear(x + 12.5f, y - 9.0f, 5.0f, 6, -a * 1.6f + 0.52f, C_GEAR_2, C_DARK);
+    gear(x, y, 7.5f, 8, a, C_GEAR, C_DARK);
+}
+
+// A round badge over a head, with a tail towards it.
+static void badge(int cx, int top, int bob, uint16_t c) {
+    oval(cx + 21, top - 9 - bob, 11, 12, C_DARK, 80);
+    rrect(cx + 10, top - 22 - bob, 20, 22, 7, c);
+    disc(cx + 11, top + 2 - bob, 2.5f, c);
+}
+
+// The context used, as a stack of paper on the desk: full when it is as
+// tall as the monitor.
+static void paper_stack(int x, int base, int ctx, uint8_t id, bool shrinking) {
+    int h = ctx * 42 / TEAM_CTX_FULL;
+    if (ctx > 0 && h < 2) h = 2;
+    // Compacting: the stack sinks and comes back, sheets going out of it.
+    if (shrinking) h = h * (255 - pulse(1600) * 3 / 4) / 255;
+    oval(x + 10, base + 1, 13, 3, C_DARK, 70);
+    for (int k = 0; k * 2 < h; k++) {
+        const int y = base - 2 - k * 2;
+        const int dx = (int)((k * 7 + id) % 3) - 1;      // not quite squared up
+        rect(x + dx, y, 20, 2, C_PAPER);
+        rect(x + dx, y + 1, 20, 1, C_PAPER_E);
+    }
+    if (h < 2) return;
+    // The top sheet, which says how near the limit it is.
+    const int top = base - ((h + 1) / 2) * 2;
+    const uint16_t c = ctx >= TEAM_CTX_FULL * 9 / 10 ? C_FAIL : ctx >= TEAM_CTX_FULL * 3 / 4 ? C_ALERT : C_WHITE;
+    rect(x - 1, top - 1, 20, 2, c);
+    rect(x + 2, top - 1, 9, 1, mix(c, C_DARK, 60));
 }
 
 static const uint16_t C_PART    = RGB(126, 138, 152);
@@ -936,7 +1090,7 @@ static void draw_bench(int cx, int y, uint16_t top_c, uint16_t front_c, uint16_t
 // upright of an L. They are furniture: there whether or not anyone sits.
 static void draw_cubicle_subs(int slot, const Desk* d, int fade) {
     const int cx = desk_cx(slot), top = desk_top(slot), style = cub_style(slot);
-    const bool busy = d && (d->state == 'w' || d->state == 't' || d->state == 'd');
+    const bool busy = d && busy_state(d->state);
     const uint16_t c_top = mix(C_DESK, C_FLOOR_A, fade), c_front = mix(C_DESK_F, C_FLOOR_A, fade);
     const uint16_t c_hi = mix(C_DESK_HI, C_FLOOR_A, fade);
     #define SEATED(i) (d && d->sub[i].phase == TEAM_SEAT && d->sub[i].office == slot / per_office())
@@ -973,7 +1127,7 @@ static void draw_cubicle_subs(int slot, const Desk* d, int fade) {
 }
 
 static void draw_desk(int slot) {
-    const Desk* d = at_slot(slot, false);
+    const Desk* d = dark ? NULL : at_slot(slot, false);
     const bool live = d != NULL;
     const bool seated = live && d->lead.phase == TEAM_SEAT && d->lead.office == slot / per_office();
     const int cx = desk_cx(slot), top = desk_top(slot);
@@ -997,6 +1151,9 @@ static void draw_desk(int slot) {
         if (d->state == 'w') screen = mix(C_SCREEN, SHIRT[d->color], 210);
         else if (d->state == 'q') screen = mix(C_SCREEN, C_ALERT, pulse(900));
         else if (d->state == 't' || d->state == 'd') screen = mix(C_SCREEN, SHIRT[d->color], 70);
+        else if (d->state == 'c') screen = mix(C_SCREEN, C_ALERT, 60 + pulse(1600) / 4);
+        else if (d->state == 'f') screen = mix(C_SCREEN, C_DONE, 150);
+        else if (d->state == 'e') screen = mix(C_SCREEN, C_FAIL, 150);
     }
     rect(cx - 30, top + 38, 6, 5, DIMMED(C_DARK));
     rrect(cx - 36, top + 42, 18, 4, 2, DIMMED(C_DARK));
@@ -1009,18 +1166,34 @@ static void draw_desk(int slot) {
             rect(cx - 38 + (k & 1) * 3, top + 18 + i * 4, 8 + (k * 5) % 13, 2, mix(SHIRT[d->color], C_DARK, 190));
         }
     }
-    // Keyboard, hands, a mug.
+    if (live && seated && d->state == 'f') {
+        // A tick on the screen: done.
+        for (int i = 0; i < 4; i++) rect(cx - 33 + i, top + 25 + i, 2, 2, C_DARK);
+        for (int i = 0; i < 8; i++) rect(cx - 29 + i, top + 28 - i, 2, 2, C_DARK);
+    } else if (live && seated && d->state == 'e') {
+        rect(cx - 28, top + 18, 3, 9, C_DARK);
+        rect(cx - 28, top + 29, 3, 3, C_DARK);
+    } else if (live && seated && d->state == 'c') {
+        // A bar closing in: the context being squeezed.
+        const int w = 22 - pulse(1600) * 16 / 255;
+        rect(cx - 27 - w / 2, top + 23, w, 4, mix(C_ALERT, C_DARK, 60));
+    }
+    // Keyboard, hands, and the context's paper (a mug when it isn't known).
     rrect(cx - 9, top + 41, 26, 9, 2, DIMMED(C_KEYS));
     rect(cx - 7, top + 44, 22, 1, DIMMED(C_DIM));
     rect(cx - 7, top + 47, 22, 1, DIMMED(C_DIM));
-    if (live && seated && d->state != 'i') {
+    if (live && seated && d->state != 'i' && d->state != 'f' && d->state != 'e') {
         const uint16_t skin = SKIN[d->lead.look % 3];
         const int tap = d->state == 'w' ? (int)((clock_ms / 110) % 4) : 1;
         disc(cx - 4 + (tap == 0) * 2, top + 44 + (tap == 1), 2.6f, skin);
         disc(cx + 8 - (tap == 2) * 2, top + 44 + (tap == 3), 2.6f, skin);
     }
-    disc(cx + 34, top + 45, 5, DIMMED(C_WHITE));
-    disc(cx + 34, top + 45, 3.2f, DIMMED(RGB(110, 72, 48)));
+    if (live && d->ctx >= 0) {
+        paper_stack(cx + 22, top + 54, d->ctx, d->id, d->state == 'c');
+    } else {
+        disc(cx + 34, top + 45, 5, DIMMED(C_WHITE));
+        disc(cx + 34, top + 45, 3.2f, DIMMED(RGB(110, 72, 48)));
+    }
     #undef DIMMED
 
     if (skin == TEAM_SKIN_CUBICLES) { draw_cubicle_subs(slot, d, fade); return; }
@@ -1041,7 +1214,7 @@ static void draw_desk(int slot) {
         if (d->sub[s].phase != TEAM_SEAT) continue;
         int sx, sy;
         seat_of(slot, s, &sx, &sy);
-        const bool busy = d->state == 'w' || d->state == 't' || d->state == 'd';
+        const bool busy = busy_state(d->state);
         rrect(sx - 8, top + 88, 16, 10, 2, C_DIM);
         rect(sx - 6, top + 90, 12, 6, busy ? mix(C_SCREEN, d->sub[s].shirt, 120 + pulse(700 + s * 130) / 2) : C_SCREEN);
     }
@@ -1052,9 +1225,27 @@ static void draw_walker(const Actor* a) {
 }
 
 void team_render(uint16_t* buf, int office) {
-    fb = buf;
-    draw_room(office);
+    // The fixed parts of the room: copied from the cache when there is one.
+    if (cache) {
+        if (cache_key != skin) {
+            fb = cache;
+            draw_room_fixed();
+            cache_key = skin;
+        }
+        memcpy(buf, cache, (size_t)TEAM_W * TEAM_H * sizeof(uint16_t));
+        fb = buf;
+    } else {
+        fb = buf;
+        draw_room_fixed();
+    }
+    draw_room_live(office);
     for (int i = 0; i < per_office(); i++) draw_desk(office * per_office() + i);
+    if (dark) {
+        // Shut: the lights are off and nobody is in.
+        shade(0, 0, TEAM_W, BAR_Y, C_DARK, 150);
+        shade(0, BAR_Y, TEAM_W, TEAM_H - BAR_Y, C_DARK, 215);
+        return;
+    }
     // People on their feet in this office, the ones nearer the wall first.
     const Actor* up[TEAM_MAX * (TEAM_SEATS + 1)];
     int n = 0;
@@ -1079,23 +1270,35 @@ void team_render(uint16_t* buf, int office) {
         if (!d->used || d->closing || d->lead.office != office) continue;
         const Actor* a = &d->lead;
         const int cx = (int)a->x, top = (int)a->y;
-        if (d->state == 'q' && a->phase == TEAM_SEAT) {
+        const bool seat = a->phase == TEAM_SEAT;
+        if (d->state == 'q' && seat) {
             const int bob = pulse(1000) / 80;
-            oval(cx + 21, top - 9 - bob, 11, 12, C_DARK, 80);
-            rrect(cx + 10, top - 22 - bob, 20, 22, 7, C_ALERT);
-            disc(cx + 11, top + 2 - bob, 2.5f, C_ALERT);
+            badge(cx, top, bob, C_ALERT);
             glyph(cx + 15, top - 19 - bob, '?', 2, C_DARK);
-        } else if (d->state == 'i' && a->phase == TEAM_SEAT) {
+        } else if (d->state == 'e' && seat) {
+            badge(cx, top, 0, C_FAIL);
+            glyph(cx + 15, top - 19, '!', 2, C_DARK);
+        } else if (d->state == 'f' && seat) {
+            // Done, your move: a tick, and it nods for attention at first.
+            const int bob = d->think_ms < 6000 ? pulse(800) / 64 : 0;
+            badge(cx, top, bob, C_DONE);
+            for (int i = 0; i < 4; i++) rect(cx + 14 + i, top - 13 + i - bob, 2, 3, C_DARK);
+            for (int i = 0; i < 8; i++) rect(cx + 18 + i, top - 10 - i - bob, 2, 3, C_DARK);
+        } else if (d->state == 'i' && seat) {
             const int t = (int)(clock_ms % 2400);
             glyph(cx + 12 + t / 300, top - 6 - t / 150, 'z', 2, mix(C_FLOOR_A, C_WHITE, 220 - t / 12));
             const int t2 = (t + 1200) % 2400;
             glyph(cx + 12 + t2 / 300, top - 6 - t2 / 150, 'z', 1, mix(C_FLOOR_A, C_WHITE, 220 - t2 / 12));
-        } else if (a->phase == TEAM_BOARD || (d->state == 'd' && a->phase == TEAM_SEAT)) {
-            // Thinking: at the board, or at the desk while the sub-agents work.
-            for (int k = 0; k < 3; k++) {
-                const bool on = (clock_ms / 350) % 4 > (uint32_t)k;
-                disc(cx + 14 + k * 7, top + 2, on ? 2.4f : 1.4f, on ? C_WHITE : C_DIM);
-            }
+        } else if (d->state == 'c' && seat) {
+            // Compacting: pressed in from both sides.
+            const int in = pulse(1600) / 64;
+            glyph(cx + 6 + in, top - 14, '>', 2, C_ALERT);
+            glyph(cx + 24 - in, top - 14, '<', 2, C_ALERT);
+            rect(cx + 19, top - 13, 2, 12, C_ALERT);
+        } else if (a->phase == TEAM_BOARD || ((d->state == 'd' || d->state == 't') && seat)) {
+            // Thinking: at the board, or at the desk (while the sub-agents
+            // work, or before the walk over).
+            gears(cx + 19, top - 1);
         }
     }
 

@@ -630,6 +630,15 @@ void ble_send_nack(void) {
     }
 }
 
+void ble_send_desk(uint8_t id) {
+    if (state == BLE_STATE_CONNECTED && tx_char) {
+        char msg[20];
+        snprintf(msg, sizeof(msg), "{\"desk\":\"%02x\"}", id);
+        tx_char->setValue(msg);
+        tx_char->notify();
+    }
+}
+
 void ble_send_dismiss(void) {
     if (state == BLE_STATE_CONNECTED && tx_char) {
         tx_char->setValue("{\"dismiss\":true}");

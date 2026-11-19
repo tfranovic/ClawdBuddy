@@ -1101,6 +1101,9 @@ static void update_view_state(void) {
     }
     if (v == view_state) return;
     view_state = v;
+#ifdef PET_ASCII
+    team_view_link(v);
+#endif
     if (v == 0) {
         lv_obj_add_flag(usage_group, LV_OBJ_FLAG_HIDDEN);
         lv_obj_clear_flag(pair_group, LV_OBJ_FLAG_HIDDEN);

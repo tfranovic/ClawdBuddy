@@ -148,6 +148,7 @@ const char* ble_get_data(void) {
 void ble_send_ack(void)  {}
 void ble_send_nack(void) { printf("[sim] payload NACKed — check the scenario JSON\n"); }
 void ble_request_refresh(void) {}
+void ble_send_desk(uint8_t id) { printf("[sim] TX {\"desk\":\"%02x\"}\n", id); }
 void ble_send_dismiss(void) { printf("[sim] TX {\"dismiss\":true}\n"); }
 void ble_set_battery_level(int pct) { (void)pct; }
 

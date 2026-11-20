@@ -385,7 +385,9 @@ fn question(tool_input: Option<&Value>) -> Option<Option<Value>> {
 
 /// The `last-tool` file's text for a `PostToolUse` input: the tool's name and
 /// the session's project (`{"p": project, "t": tool}`), never its input or
-/// output. `None` for any other event.
+/// output. A sub-agent may work in a folder of its own, so its tool names the
+/// session instead (`{"s": session id, "t": tool}`) and the app looks the
+/// project up. `None` for any other event.
 pub fn last_tool_json(v: &Value) -> Option<String> {
     let obj = v.as_object()?;
     if obj.get("hook_event_name")?.as_str()? != "PostToolUse" {
@@ -393,8 +395,16 @@ pub fn last_tool_json(v: &Value) -> Option<String> {
     }
     let tool = obj.get("tool_name")?.as_str()?;
     let mut out = Map::new();
-    if let Some(p) = project_of(obj.get("cwd")) {
-        out.insert("p".into(), Value::String(p));
+    let sub_agent = obj.get("agent_id").and_then(Value::as_str).is_some_and(|a| !a.is_empty());
+    match obj.get("session_id").and_then(Value::as_str) {
+        Some(s) if sub_agent => {
+            out.insert("s".into(), Value::String(s.to_owned()));
+        }
+        _ => {
+            if let Some(p) = project_of(obj.get("cwd")) {
+                out.insert("p".into(), Value::String(p));
+            }
+        }
     }
     out.insert("t".into(), Value::String(tool.to_owned()));
     Some(Value::Object(out).to_string() + "\n")
@@ -577,6 +587,9 @@ mod tests {
         let tool = json!({"hook_event_name": "PostToolUse", "tool_name": "Bash", "cwd": "/w/api",
             "tool_input": {"command": "secret"}});
         assert_eq!(last_tool_json(&tool).unwrap(), "{\"p\":\"api\",\"t\":\"Bash\"}\n");
+        let sub = json!({"hook_event_name": "PostToolUse", "tool_name": "Edit", "cwd": "/w/T-1",
+            "session_id": "s1", "agent_id": "a1"});
+        assert_eq!(last_tool_json(&sub).unwrap(), "{\"s\":\"s1\",\"t\":\"Edit\"}\n");
         assert_eq!(last_tool_json(&json!({"hook_event_name": "Stop", "tool_name": "Bash"})), None);
         let idle = json!({"hook_event_name": "Notification", "notification_type": "idle_prompt", "message": "Waiting"});
         assert_eq!(alert_json(&idle).unwrap(), "{\"k\":\"idle\",\"m\":\"Waiting\",\"s\":null}\n");

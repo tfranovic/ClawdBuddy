@@ -83,6 +83,10 @@ by each sub-agent's result does not flicker; waiting for you shows at once,
 and so does its end. A sub-agent may work in another folder (a worktree): the
 session's project is the main agent's.
 
+A desk's name is the session's title, cut between words to fit 12
+characters (`Enterprise migration plan` reads `Enterprise`), or the project
+when there is no title yet.
+
 A session leaves when it exits (`SessionEnd`), when its process is gone, 15
 minutes after its last turn ended, or after an hour without any event.
 

@@ -112,8 +112,10 @@ tap the left or right side of the screen.
 
 **Desks.** Each Claude Code session gets a desk, named after the session's
 title (the one Claude Code shows for it) or, before it has one, its working
-directory. Two sessions that would read the same are numbered (`api`,
-`api 2`). Sessions sit in the order they arrived and keep their desks, six to an office.
+directory. A title too long for the desk (12 characters) is cut between
+words. Two sessions that would read the same are numbered (`api`, `api 2`).
+Sessions sit in the order they arrived and keep their desks, six to an
+office.
 
 **Two styles.** The app's Device page offers two looks for the office.
 Everything else on this page works the same in both.

@@ -183,6 +183,7 @@ pub async fn run(paths: Paths, mut commands: mpsc::UnboundedReceiver<Command>, s
     let mut shown_appearance = None;
     let inbox = AttentionInbox::new(&paths.state_dir);
     let mut team = clawdbuddy_core::team::TeamTracker::new(&paths.state_dir);
+    let mut logged_theme = String::new();
     let mut pet_mood = clawdbuddy_core::team::PetMood::default();
     let (mut tail, seed) = EventTail::open(paths.events_log());
     engine.seed_events(&seed);
@@ -273,7 +274,7 @@ pub async fn run(paths: Paths, mut commands: mpsc::UnboundedReceiver<Command>, s
             engine.on_hook_event(&ev, now);
         }
         engine.set_hooks_installed(tail.exists());
-        engine.set_last_tool(clawdbuddy_core::attention::read_last_tool(&paths.state_dir));
+        engine.set_last_tool(clawdbuddy_core::attention::read_last_tool_with(&paths.state_dir, |s| team.project_of(s)));
         let beside = clawdbuddy_core::team::Beside {
             status: clawdbuddy_core::statusline::read_all(&paths.state_dir, now),
             running: clawdbuddy_core::sessions::read_all(&engine.settings().config_dirs),
@@ -312,7 +313,7 @@ pub async fn run(paths: Paths, mut commands: mpsc::UnboundedReceiver<Command>, s
                         engine.request_refresh(now);
                     }
                     DeviceEvent::Dismissed => {
-                        log::info!("attention alert dismissed on the device");
+                        log::info!("attention alert ended on the device (dismissed there, or its own time ran out)");
                         engine.on_device_dismissed();
                     }
                     DeviceEvent::Detail(desk) => engine.on_device_detail(desk),
@@ -453,7 +454,10 @@ pub async fn run(paths: Paths, mut commands: mpsc::UnboundedReceiver<Command>, s
                     WriteKind::Event => "Event",
                     WriteKind::NoData => "No data",
                 };
-                log::info!("{label}: {}", String::from_utf8_lossy(&bytes));
+                log::info!(
+                    "{label}: {}",
+                    unchanged_theme_left_out(&String::from_utf8_lossy(&bytes), &mut logged_theme)
+                );
                 match l.write(&bytes).await {
                     Ok(()) => {
                         engine.mark_written(now, &w);
@@ -593,5 +597,46 @@ pub fn once(paths: &Paths) -> i32 {
         0
     } else {
         1
+    }
+}
+
+/// A payload as the log shows it: without the theme's colours (`th`, `fc`,
+/// a quarter of every write) while they are the ones last logged.
+fn unchanged_theme_left_out(payload: &str, last: &mut String) -> String {
+    let field = |key: &str| {
+        let start = payload.find(&format!(",\"{key}\":\""))?;
+        let value = start + key.len() + 5;
+        let end = value + payload[value..].find('"')? + 1;
+        Some(start..end)
+    };
+    let (th, fc) = (field("th"), field("fc"));
+    let theme: String = [&th, &fc].into_iter().flatten().map(|r| &payload[r.clone()]).collect();
+    if theme != *last {
+        *last = theme;
+        return payload.to_owned();
+    }
+    let mut out = payload.to_owned();
+    let mut cuts: Vec<_> = [th, fc].into_iter().flatten().collect();
+    cuts.sort_by_key(|r| std::cmp::Reverse(r.start));
+    for r in cuts {
+        out.replace_range(r, "");
+    }
+    out
+}
+
+#[cfg(test)]
+mod log_tests {
+    use super::unchanged_theme_left_out;
+
+    #[test]
+    fn the_theme_is_logged_when_it_changes() {
+        let mut last = String::new();
+        let a = r#"{"s":1,"th":"0011","fc":"97","n":2}"#;
+        assert_eq!(unchanged_theme_left_out(a, &mut last), a);
+        assert_eq!(unchanged_theme_left_out(a, &mut last), r#"{"s":1,"n":2}"#);
+        let b = r#"{"s":1,"th":"0022","fc":"97"}"#;
+        assert_eq!(unchanged_theme_left_out(b, &mut last), b);
+        assert_eq!(unchanged_theme_left_out(r#"{"s":2}"#, &mut last), r#"{"s":2}"#);
+        assert_eq!(unchanged_theme_left_out(b, &mut last), b, "back after a write without one");
     }
 }

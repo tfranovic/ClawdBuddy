@@ -496,13 +496,13 @@ fn desks_seated(events: &[TeamEvent], now: i64, beside: &Beside, arrived: &HashM
         let numbers = beside.status.get(sid);
         let clean =
             |t: &str, limit| -> String { to_ascii(t, limit).chars().filter(|c| *c != '|' && *c != '"').collect() };
-        // On the desk a long project name ends in dots; a title is simply cut.
+        // On the desk a long project name ends in dots; a title is cut between words.
         let project = clean(&s.project, TITLE_LIMIT);
         let (name, label) = if s.title.is_empty() {
             (project.clone(), clean(&s.project, NAME_LIMIT))
         } else {
             let t = clean(&s.title, TITLE_LIMIT);
-            (t.clone(), t.chars().take(NAME_LIMIT).collect::<String>().trim_end().to_owned())
+            (t.clone(), cut_words(&t, NAME_LIMIT))
         };
         let mut kinds: BTreeMap<&str, u8> = BTreeMap::new();
         for sub in s.subs.values() {
@@ -536,6 +536,22 @@ fn desks_seated(events: &[TeamEvent], now: i64, beside: &Beside, arrived: &HashM
     }
     number_twins(&mut out);
     out
+}
+
+/// `text` in at most `limit` characters. A cut that would land inside a word
+/// is made at the space before it, unless that leaves under half the room.
+fn cut_words(text: &str, limit: usize) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    if chars.len() <= limit {
+        return text.to_owned();
+    }
+    let mut end = limit;
+    if chars[limit] != ' ' {
+        if let Some(space) = chars[..limit].iter().rposition(|c| *c == ' ').filter(|i| *i * 2 >= limit) {
+            end = space;
+        }
+    }
+    chars[..end].iter().collect::<String>().trim_end().to_owned()
 }
 
 /// Claude Code's own word on a session, where it is newer than the hooks':
@@ -821,6 +837,13 @@ impl TeamTracker {
         [self.dir.join("team.log.1"), self.dir.join("team.log")]
     }
 
+    /// The project of a session in the log: its main agent's, or failing
+    /// that whatever folder it was last seen in.
+    pub fn project_of(&self, session: &str) -> Option<String> {
+        let named = || self.events.iter().rev().filter(|e| e.session == session && !e.project.is_empty());
+        named().find(|e| e.agent.is_none()).or_else(|| named().next()).map(|e| e.project.clone())
+    }
+
     /// The `tm` field at `now`.
     pub fn poll(&mut self, now: i64) -> String {
         self.poll_with(now, &Beside::default()).tm
@@ -1068,6 +1091,20 @@ mod tests {
     }
 
     #[test]
+    fn a_title_is_cut_between_words() {
+        assert_eq!(cut_words("Enterprise migration", 12), "Enterprise");
+        assert_eq!(cut_words("Sunfire enrollment", 12), "Sunfire");
+        assert_eq!(cut_words("Fix the login", 12), "Fix the");
+        assert_eq!(cut_words("Twelve chars and more", 12), "Twelve chars");
+        // No space to cut at, or one too early to be worth it.
+        assert_eq!(cut_words("ESP32-S3-Touch-LCD", 12), "ESP32-S3-Tou");
+        assert_eq!(cut_words("A reorganisation", 12), "A reorganisa");
+        assert_eq!(cut_words("short", 12), "short");
+        let evs = [ev(5, "UserPromptSubmit s1 - - +tt=Enterprise_migration_plan api")];
+        assert_eq!(desks(&evs, 6)[0].name, "Enterprise");
+    }
+
+    #[test]
     fn the_field() {
         let d = vec![
             Desk { id: 0xa3, state: State::Working, subs: 2, quiet: 1, name: "TestApp".into(), ..Desk::default() },
@@ -1163,7 +1200,7 @@ mod tests {
             ev(t + 5, "TaskCompleted s1 - - api"),
         ];
         let d = desks(&evs, t + 6);
-        assert_eq!(d[0].name, "Fix the logi");
+        assert_eq!(d[0].name, "Fix the");
         assert_eq!((d[0].mode, d[0].model), ('p', 'f'));
         assert_eq!(d[0].detail.title, "Fix the login page");
         assert_eq!(d[0].detail.tasks, (1, 2));

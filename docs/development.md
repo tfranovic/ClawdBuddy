@@ -72,3 +72,18 @@ publishes a GitHub release with:
 
 The app looks for releases in `tfranovic/ClawdBuddy` (`release_repo` in its
 config). The tag is the version: the firmware and the app both report it.
+
+## The app's log
+
+The app writes `daemon.log` in its folder (`~/.config/clawdbuddy` on macOS
+and Linux): what it found at start, the link to the board coming and going,
+alerts, and every payload it wrote, labelled by why (`Sending` after a usage
+poll, `Event` for a hook, `Attention`, `Heartbeat`).
+
+- Lines are `[HH:MM:SS] message`. A `--- 2026-11-20 ---` line marks the start
+  and each new day.
+- A payload is logged without the theme's colours (`th`, `fc`) while they are
+  the ones last logged.
+- The previous run's log is kept as `daemon.log.1`. A log that reaches 4 MB
+  is rolled there too, so the two never take more than 8 MB.
+- `CLAWDBUDDY_LOG=debug` (or `error`, `warn`, `trace`, `off`) sets the level.

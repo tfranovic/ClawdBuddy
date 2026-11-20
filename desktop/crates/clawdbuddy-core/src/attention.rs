@@ -178,12 +178,22 @@ pub const LAST_TOOL_LIMIT: usize = 34;
 /// shows its last part. A long project name is cut (`a-very-long-project-name-ind..: Edit`)
 /// so the tool always shows. `None` when the file is absent or unreadable.
 pub fn read_last_tool(dir: &Path) -> Option<String> {
+    read_last_tool_with(dir, |_| None)
+}
+
+/// [`read_last_tool`], where a sub-agent's tool (`{"s": session id, "t":
+/// tool}`) gets its session's project from `project_of`.
+pub fn read_last_tool_with(dir: &Path, project_of: impl Fn(&str) -> Option<String>) -> Option<String> {
     let raw = fs::read_to_string(dir.join("last-tool")).ok()?;
     let v: serde_json::Value = serde_json::from_str(&raw).ok()?;
     let tool = v.get("t")?.as_str()?;
     let tool = tool.rsplit("__").next().unwrap_or(tool);
     let tool = to_ascii(tool, LAST_TOOL_LIMIT);
-    let project = v.get("p").and_then(|p| p.as_str()).map(|p| to_ascii(p, PROJECT_LIMIT)).unwrap_or_default();
+    let project = match v.get("s").and_then(|s| s.as_str()) {
+        Some(session) => project_of(session),
+        None => v.get("p").and_then(|p| p.as_str()).map(str::to_owned),
+    };
+    let project = project.map(|p| to_ascii(&p, PROJECT_LIMIT)).unwrap_or_default();
     let room = LAST_TOOL_LIMIT.saturating_sub(tool.len() + 2);
     let line = if project.is_empty() || room < 4 {
         tool
@@ -654,6 +664,10 @@ mod tests {
         assert_eq!(read_last_tool(&d).as_deref(), Some("create_issue"));
         fs::write(d.join("last-tool"), r#"{"p":"a-very-long-project-name-indeed-yes","t":"Edit"}"#).unwrap();
         assert_eq!(read_last_tool(&d).as_deref(), Some("a-very-long-project-name-i..: Edit"));
+        fs::write(d.join("last-tool"), r#"{"s":"s1","t":"Edit"}"#).unwrap();
+        assert_eq!(read_last_tool(&d).as_deref(), Some("Edit"));
+        let known = |s: &str| (s == "s1").then(|| "api".to_owned());
+        assert_eq!(read_last_tool_with(&d, known).as_deref(), Some("api: Edit"));
         fs::write(d.join("last-tool"), "junk").unwrap();
         assert_eq!(read_last_tool(&d), None);
     }

@@ -113,7 +113,7 @@ tap the left or right side of the screen.
 **Desks.** Each Claude Code session gets a desk, named after the session's
 title (the one Claude Code shows for it) or, before it has one, its working
 directory. Two sessions that would read the same are numbered (`api`,
-`api 2`). Sessions sit in the order they started, six to an office.
+`api 2`). Sessions sit in the order they arrived and keep their desks, six to an office.
 
 **Two styles.** The app's Device page offers two looks for the office.
 Everything else on this page works the same in both.
@@ -149,6 +149,10 @@ the wall, and form a second row only when the first is full.
 | Arrows pressing in from both sides, a pulsing monitor | Compacting its context |
 | Head down under a `z` | Three minutes after its turn ended |
 | At the water cooler with a cup | Six minutes after its turn ended |
+
+A desk keeps what it shows for at least eight seconds, so a main agent woken
+by each of its sub-agents does not flicker; only a `?` appears and goes at
+once. Compacting is the main agent's own: a sub-agent's is not shown.
 
 **Paper for the context.** The stack of paper on a desk is how much of its
 context window the session has used: as tall as the monitor when it is full.

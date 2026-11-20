@@ -50,7 +50,9 @@ pub const DONE_BREAK_AFTER_SECS: i64 = 360;
 /// turn is taken as over (an interrupt has no event of its own).
 pub const STALE_TURN_SECS: i64 = 300;
 /// Compaction that never reported its end is over after this long.
-pub const COMPACT_TTL_SECS: i64 = 600;
+pub const COMPACT_TTL_SECS: i64 = 120;
+/// A desk keeps the state it shows at least this long ([`TeamTracker`]).
+pub const MIN_SHOW_SECS: i64 = 8;
 /// An idle session leaves the office after this long.
 pub const IDLE_TTL_SECS: i64 = 900;
 /// Any session leaves after this long without an event.
@@ -252,6 +254,9 @@ struct Session {
     /// Tools started and not yet finished.
     open: Vec<String>,
     compacting: Option<i64>,
+    /// A sub-agent is compacting (a `PreCompact` that was not the main
+    /// agent's): the `SessionStart` that ends it is the sub-agent's too.
+    sub_compacting: bool,
     project: String,
     title: String,
     mode: String,
@@ -321,6 +326,13 @@ pub fn desks(events: &[TeamEvent], now: i64) -> Vec<Desk> {
 /// [`desks`], with the status line's numbers and Claude Code's list of
 /// running sessions.
 pub fn desks_with(events: &[TeamEvent], now: i64, beside: &Beside) -> Vec<Desk> {
+    desks_seated(events, now, beside, &HashMap::new())
+}
+
+/// [`desks_with`], seated by when each session was first seen (`arrived`,
+/// by session id) rather than by its oldest event still in the window, which
+/// moves as events age out and would have busy sessions swap desks.
+fn desks_seated(events: &[TeamEvent], now: i64, beside: &Beside, arrived: &HashMap<String, i64>) -> Vec<Desk> {
     let mut sessions: BTreeMap<&str, Session> = BTreeMap::new();
     for ev in events.iter().filter(|e| e.ts <= now && now - e.ts <= SESSION_TTL_SECS) {
         let s = sessions.entry(&ev.session).or_default();
@@ -328,7 +340,9 @@ pub fn desks_with(events: &[TeamEvent], now: i64, beside: &Beside) -> Vec<Desk> 
             *s = Session { first: ev.ts, since: ev.ts, ..Session::default() };
         }
         s.last = ev.ts;
-        if !ev.project.is_empty() {
+        // A sub-agent may work in a folder of its own (a worktree): the
+        // session's project is the main agent's, unless nothing else is known.
+        if !ev.project.is_empty() && (ev.agent.is_none() || s.project.is_empty()) {
             s.project.clone_from(&ev.project);
         }
         let name = ev.event.as_str();
@@ -354,6 +368,22 @@ pub fn desks_with(events: &[TeamEvent], now: i64, beside: &Beside) -> Vec<Desk> 
             }
             continue;
         }
+        // A compaction carries no agent id, a sub-agent's included. It is a
+        // sub-agent's when there are some and the main agent is not in a
+        // turn of its own (resting, or held in the call that runs them).
+        if name == "PreCompact" {
+            let subs_live = s.subs.values().any(|sub| ev.ts - sub.seen <= SUB_TTL_SECS);
+            let own_turn =
+                matches!(s.state, Some(State::Working | State::Thinking)) && !s.open.iter().any(|t| spawns_agents(t));
+            s.sub_compacting = subs_live && !own_turn;
+        }
+        if s.sub_compacting && matches!(name, "PreCompact" | "PostCompact" | "SessionStart") {
+            if name == "PostCompact" {
+                s.sub_compacting = false;
+            }
+            continue;
+        }
+        s.sub_compacting = false;
         s.last_main = ev.ts;
         if let Some(m) = ev.extra("pm") {
             s.mode = m.to_owned();
@@ -447,7 +477,7 @@ pub fn desks_with(events: &[TeamEvent], now: i64, beside: &Beside) -> Vec<Desk> 
     // Too many: the busy ones first, then the most recent.
     live.sort_by_key(|(_, s)| (s.state.is_none_or(State::resting), -s.last));
     live.truncate(MAX_DESKS);
-    live.sort_by_key(|(id, s)| (s.first, *id));
+    live.sort_by_key(|(id, s)| (arrived.get(*id).copied().unwrap_or(s.first), *id));
 
     let mut out: Vec<Desk> = Vec::with_capacity(live.len());
     for (sid, s) in live {
@@ -775,12 +805,16 @@ pub struct TeamTracker {
     dir: PathBuf,
     stamp: Option<[Option<(u64, SystemTime)>; 2]>,
     events: Vec<TeamEvent>,
+    /// When each session now in the log was first seen.
+    arrived: HashMap<String, i64>,
+    /// The state each desk shows, and since when, by desk id.
+    shown: HashMap<u8, (State, i64)>,
 }
 
 impl TeamTracker {
     /// Follow the files in `dir` (the state dir).
     pub fn new(dir: impl Into<PathBuf>) -> Self {
-        TeamTracker { dir: dir.into(), stamp: None, events: Vec::new() }
+        TeamTracker { dir: dir.into(), stamp: None, events: Vec::new(), arrived: HashMap::new(), shown: HashMap::new() }
     }
 
     fn files(&self) -> [PathBuf; 2] {
@@ -805,9 +839,45 @@ impl TeamTracker {
             self.events.retain(|e| now - e.ts <= SESSION_TTL_SECS);
             self.events.sort_by_key(|e| e.ts);
             self.stamp = Some(stamp);
+            // A session that ended and came back is a new arrival; one with
+            // nothing left in the log is forgotten.
+            for e in &self.events {
+                if e.event == "SessionEnd" {
+                    self.arrived.remove(&e.session);
+                } else {
+                    self.arrived.entry(e.session.clone()).or_insert(e.ts);
+                }
+            }
+            let events = &self.events;
+            self.arrived.retain(|id, _| events.iter().any(|e| &e.session == id));
         }
-        let desks = desks_with(&self.events, now, beside);
+        let mut desks = desks_seated(&self.events, now, beside, &self.arrived);
+        self.steady(&mut desks, now);
         Team { tm: encode(&desks), tx: encode_extra(&desks), desks }
+    }
+
+    /// Keep a desk in the state it shows for [`MIN_SHOW_SECS`], so a main
+    /// agent woken by each of its sub-agents' results does not flicker. A
+    /// session that starts or stops waiting for the user shows at once.
+    fn steady(&mut self, desks: &mut [Desk], now: i64) {
+        self.shown.retain(|id, _| desks.iter().any(|d| d.id == *id));
+        for d in desks {
+            match self.shown.get(&d.id).copied() {
+                Some((shown, since)) if shown != d.state => {
+                    let urgent = shown == State::Waiting || d.state == State::Waiting;
+                    // A clock set back must not hold a state for ever.
+                    if urgent || !(0..MIN_SHOW_SECS).contains(&(now - since)) {
+                        self.shown.insert(d.id, (d.state, now));
+                    } else {
+                        d.state = shown;
+                    }
+                }
+                Some(_) => {}
+                None => {
+                    self.shown.insert(d.id, (d.state, now));
+                }
+            }
+        }
     }
 }
 
@@ -928,6 +998,73 @@ mod tests {
         assert_eq!(ids.len(), MAX_DESKS);
         // Seated in arrival order.
         assert_eq!(d[0].name, "p0");
+    }
+
+    #[test]
+    fn a_sub_agents_compaction_and_folder_are_not_the_main_agents() {
+        let t = 1000;
+        let mut evs = vec![
+            ev(t, "UserPromptSubmit s1 - - +md=claude-sonnet-5-5 api"),
+            ev(t + 1, "PreToolUse s1 - Agent api"),
+            ev(t + 2, "PreToolUse s1 a1 Bash T-1"),
+            // Held in the Agent call: this compaction is the sub-agent's.
+            ev(t + 3, "PreCompact s1 - - api"),
+            ev(t + 4, "PostToolUse s1 a1 Bash T-1"),
+        ];
+        let d = &desks(&evs, t + 5)[0];
+        assert_eq!((d.state, d.name.as_str()), (State::Delegating, "api"));
+        evs.push(ev(t + 9, "SessionStart s1 - - +md=claude-opus-5-5 api"));
+        evs.push(ev(t + 9, "PostCompact s1 - - api"));
+        assert_eq!(desks(&evs, t + 10)[0].model, 's');
+        // Back in a turn of its own, a compaction is the main agent's, and
+        // one that never reports its end is over in two minutes.
+        evs.push(ev(t + 20, "PostToolUse s1 - Agent api"));
+        evs.push(ev(t + 21, "PreCompact s1 - - api"));
+        assert_eq!(desks(&evs, t + 22)[0].state, State::Compacting);
+        assert_eq!(desks(&evs, t + 21 + COMPACT_TTL_SECS)[0].state, State::Compacting);
+        assert_ne!(desks(&evs, t + 22 + COMPACT_TTL_SECS)[0].state, State::Compacting);
+        // With nobody else about, a compaction between turns (/compact) shows.
+        let alone = [ev(t, "Stop s2 - - api"), ev(t + 5, "PreCompact s2 - - api")];
+        assert_eq!(desks(&alone, t + 6)[0].state, State::Compacting);
+    }
+
+    #[test]
+    fn desks_stay_put_and_states_hold() {
+        let dir = std::env::temp_dir().join(format!("clawdbuddy-team-seats-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let log = dir.join("team.log");
+        let mut t = TeamTracker::new(&dir);
+        let names = |tm: &str| tm.split('|').map(|d| d[5..].to_owned()).collect::<Vec<_>>();
+        fs::write(&log, "100 UserPromptSubmit s1 - - one\n200 UserPromptSubmit s2 - - two\n").unwrap();
+        assert_eq!(names(&t.poll(300)), ["one", "two"]);
+        // An hour on, s1's first event has aged out and its oldest is now
+        // newer than s2's: they keep their desks.
+        fs::write(
+            &log,
+            "200 UserPromptSubmit s2 - - two\n3650 PostToolUse s1 - Bash one\n3660 PostToolUse s2 - Bash two\n",
+        )
+        .unwrap();
+        assert_eq!(names(&t.poll(3750)), ["one", "two"]);
+        assert_eq!(names(&TeamTracker::new(&dir).poll(3750)), ["two", "one"], "a fresh start has only the log");
+
+        // A turn that stops and is woken again within seconds: no flicker.
+        let state = |tm: String| tm.split('|').next().unwrap().as_bytes()[2] as char;
+        fs::write(&log, "5000 UserPromptSubmit s1 - - one\n").unwrap();
+        assert_eq!(state(t.poll(5001)), 't');
+        fs::write(&log, "5000 UserPromptSubmit s1 - - one\n5002 PreToolUse s1 - Bash one\n").unwrap();
+        assert_eq!(state(t.poll(5003)), 'w', "thinking had shown long enough");
+        fs::write(&log, "5000 UserPromptSubmit s1 - - one\n5004 Stop s1 - - one\n").unwrap();
+        assert_eq!(state(t.poll(5005)), 'w', "held");
+        assert_eq!(state(t.poll(5003 + MIN_SHOW_SECS)), 'i');
+        fs::write(&log, "5000 UserPromptSubmit s1 - - one\n").unwrap();
+        assert_eq!(state(t.poll(5020)), 't');
+        // Waiting for you shows at once, and so does its end.
+        fs::write(&log, "5000 UserPromptSubmit s1 - - one\n5021 PermissionRequest s1 - Bash one\n").unwrap();
+        assert_eq!(state(t.poll(5022)), 'q');
+        fs::write(&log, "5000 UserPromptSubmit s1 - - one\n5023 PostToolUse s1 - Bash one\n").unwrap();
+        assert_eq!(state(t.poll(5024)), 'w');
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

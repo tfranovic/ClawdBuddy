@@ -58,7 +58,7 @@ the `tm` and `tx` fields ([protocol](protocol.md)).
 | Thinking | `t` | `t` | In a turn, no tool running |
 | Waiting for you | `q` | `q` | A permission prompt, a question or an elicitation dialog is up |
 | Waiting for sub-agents | `d` | `d` | An `Agent` call is running, or the turn ended and sub-agents still run |
-| Compacting | `c` | `t` | Between `PreCompact` and the next event (10 minutes at most) |
+| Compacting | `c` | `t` | Between `PreCompact` and the main agent's next event (2 minutes at most) |
 | Done | `f` | `i` | The turn ended less than 3 minutes ago |
 | Failed | `e` | `i` | The turn ended on an API error |
 | Idle | `i` | `i` | 3 to 6 minutes after the turn ended; or between turns without one having ended (an interrupt), for 2 minutes |
@@ -74,6 +74,15 @@ What is still inferred:
   sub-agent with no event for 10 minutes is taken as gone. After 2 minutes
   without an event it is counted as quiet and stands at the water cooler.
 
+- **Whose compaction it is.** `PreCompact` carries no agent id. With
+  sub-agents running and the main agent not in a turn of its own (resting,
+  or held in the `Agent` call), it is taken as a sub-agent's and not shown.
+
+A desk keeps the state it shows for at least 8 seconds, so a main agent woken
+by each sub-agent's result does not flicker; waiting for you shows at once,
+and so does its end. A sub-agent may work in another folder (a worktree): the
+session's project is the main agent's.
+
 A session leaves when it exits (`SessionEnd`), when its process is gone, 15
 minutes after its last turn ended, or after an hour without any event.
 
@@ -83,8 +92,9 @@ The firmware keeps the scene and draws it at 480×480, fifteen times a second
 (`firmware/src/pet/team_core.cpp`, pure and tested by `test_team`). The names
 and the bottom line are text labels over it (`pet/team_view.cpp`).
 
-- Sessions sit in the order the app sends them, which is the order they
-  started: six to an office with the desks skin, four with cubicles. Twelve
+- Sessions sit in the order the app sends them, which is the order the app
+  first saw them (after an app restart, the order of their oldest event in
+  the last hour): six to an office with the desks skin, four with cubicles. Twelve
   sessions is what fits one Bluetooth write (two offices of desks, three of
   cubicles); with more than six, names are cut to 8 characters.
 - The skin comes in the `tv` field (1 desks, 2 cubicles; `team_skin` in the

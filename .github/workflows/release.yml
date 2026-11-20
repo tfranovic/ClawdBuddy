@@ -264,9 +264,17 @@ jobs:
           rm -f dist/*-"$TAG".json   # per-env sidecars, folded into manifest.json
           (cd dist && sha256sum -- * > SHA256SUMS)
           cat dist/manifest.json
+      # Hand-written notes for this tag, when there are some; the generated
+      # list of changes follows them.
+      - name: Release notes
+        id: notes
+        run: |
+          f="docs/releases/$TAG.md"
+          if [ -f "$f" ]; then echo "path=$f" >> "$GITHUB_OUTPUT"; fi
       - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           files: dist/*
+          body_path: ${{ steps.notes.outputs.path }}
           generate_release_notes: true
           prerelease: ${{ contains(github.ref_name, '-') }}
           fail_on_unmatched_files: true

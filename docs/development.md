@@ -70,6 +70,10 @@ publishes a GitHub release with:
 - the app for macOS (`.dmg`, universal), Windows (`.msi`, `.zip`) and Linux
   (`.deb`, AppImage, `.tar.gz`).
 
+A file `docs/releases/<tag>.md` becomes the release's notes, above the
+generated list of changes. Its pictures need full URLs, since a release page
+does not resolve paths in the repository.
+
 The app looks for releases in `tfranovic/ClawdBuddy` (`release_repo` in its
 config). The tag is the version: the firmware and the app both report it.
 

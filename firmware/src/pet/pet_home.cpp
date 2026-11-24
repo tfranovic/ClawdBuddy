@@ -101,6 +101,12 @@ void pet_home_create(lv_obj_t* parent, int x, int y, int w, int ax, int ay, int 
         lv_obj_set_pos(lines[i], ax, ay + i * 17);
         lv_label_set_text(lines[i], "");
     }
+    // The last tool's row stops short of the uptime and idle icons at its two
+    // ends (ui.cpp: 16 px each, at the row's edges), so a long one is cut
+    // before it reaches them.
+    const int32_t keep = 16 + 8;
+    lv_obj_set_pos(lbl_tool, ax + keep, ay);
+    lv_obj_set_width(lbl_tool, aw - 2 * keep);
 
     lbl_name = label(&font_styrene_20);
     lv_obj_set_pos(lbl_name, 0, 0);

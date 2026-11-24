@@ -1,4 +1,5 @@
 #include "totals.h"
+#include <math.h>
 #include "ui.h"
 #include "performer.h"
 #include "mascot.h"
@@ -48,7 +49,7 @@ static_assert(LAYOUT_BATT_W == ICON_BATTERY_W && LAYOUT_BATT_W_SMALL == ICON_BAT
 // follow the data (bar fills, the pace text) are recomputed instead.
 enum ThemedPart : uint8_t { PART_BG, PART_TEXT, PART_IMAGE };
 struct Themed { lv_obj_t* obj; ThemeColor tok; ThemedPart part; lv_style_selector_t sel; };
-static Themed themed[40];
+static Themed themed[48];
 static int    n_themed = 0;
 
 static void paint(const Themed& t) {
@@ -74,8 +75,50 @@ static void themed_icon(lv_obj_t* obj, ThemeColor tok) {
 // ---- Usage screen widgets (single non-splash view) ----
 static lv_obj_t* usage_container;
 static lv_obj_t* lbl_title;
-static lv_obj_t* lbl_totals;     // bottom left: uptime/idle, "12h05m/3h20m"
+// Uptime at the bottom left and idle time at the bottom right, either side of
+// the session count: an icon on the last tool's line, the figure under it.
+static lv_obj_t* lbl_uptime;
+static lv_obj_t* lbl_idle;
+static lv_obj_t* img_uptime;
+static lv_obj_t* img_idle;
 static char      shown_totals[40] = "";
+
+// The two icons, drawn once as 16 px alpha masks (a clock, a crescent moon)
+// and tinted like text.
+#define TOTALS_ICON 16
+static uint8_t        totals_icon_px[2][TOTALS_ICON * TOTALS_ICON];
+static lv_image_dsc_t totals_icon_dsc[2];
+
+static bool icon_clock(float x, float y) {
+    const float dx = x - 8, dy = y - 8, r2 = dx * dx + dy * dy;
+    if (r2 <= 7.3f * 7.3f && r2 >= 5.7f * 5.7f) return true;             // the rim
+    if (fabsf(dx) <= 0.8f && dy <= 0.8f && dy >= -4.2f) return true;     // hand to 12
+    if (fabsf(dy) <= 0.8f && dx >= -0.8f && dx <= 3.4f) return true;     // hand to 3
+    return false;
+}
+static bool icon_moon(float x, float y) {
+    const float dx = x - 7.5f, dy = y - 8.5f, ex = x - 11.2f, ey = y - 5.2f;
+    return dx * dx + dy * dy <= 7.0f * 7.0f && ex * ex + ey * ey > 6.0f * 6.0f;
+}
+static void totals_icons_draw(void) {
+    bool (*const shape[2])(float, float) = { icon_clock, icon_moon };
+    for (int k = 0; k < 2; k++) {
+        for (int y = 0; y < TOTALS_ICON; y++) for (int x = 0; x < TOTALS_ICON; x++) {
+            int hit = 0;                                   // 4x4 samples a pixel
+            for (int sy = 0; sy < 4; sy++) for (int sx = 0; sx < 4; sx++)
+                if (shape[k](x + (sx + 0.5f) / 4, y + (sy + 0.5f) / 4)) hit++;
+            totals_icon_px[k][y * TOTALS_ICON + x] = (uint8_t)(hit * 255 / 16);
+        }
+        lv_image_dsc_t& d = totals_icon_dsc[k];
+        d.header.magic = LV_IMAGE_HEADER_MAGIC;
+        d.header.cf = LV_COLOR_FORMAT_A8;
+        d.header.w = TOTALS_ICON;
+        d.header.h = TOTALS_ICON;
+        d.header.stride = TOTALS_ICON;
+        d.data_size = sizeof(totals_icon_px[k]);
+        d.data = totals_icon_px[k];
+    }
+}
 // Clock fed by the daemon: base epoch (local wall-clock seconds) + the lv_tick at
 // which it landed, so the title ticks forward locally between 60s payloads.
 static long     clock_base_epoch = 0;
@@ -628,14 +671,33 @@ static void init_usage_screen(lv_obj_t* scr) {
     themed_text(lbl_title, TH_TEXT);
     apply_title_font();
 
-    lbl_totals = lv_label_create(usage_container);
-    lv_label_set_text(lbl_totals, "");
-    lv_obj_set_style_text_font(lbl_totals, &font_styrene_14, 0);
-    themed_text(lbl_totals, TH_DIM);
-    lv_obj_clear_flag(lbl_totals, LV_OBJ_FLAG_CLICKABLE);
-    // Bottom left, on the line of the session count (which stays centred).
-    if (L.pet_home) lv_obj_set_pos(lbl_totals, L.card[0].x, L.activity.y + 18);
-    else            lv_obj_align(lbl_totals, LV_ALIGN_BOTTOM_LEFT, L.card[0].x, -4);
+    // Uptime on the left and idle time on the right, the session count
+    // (pet_home.cpp) centred between them; the icons sit on the line above.
+    totals_icons_draw();
+    const int16_t tot_l = L.card[0].x, tot_r = L.card[0].x + L.card[0].w;
+    lv_obj_t** const tot_lbl[2] = { &lbl_uptime, &lbl_idle };
+    lv_obj_t** const tot_img[2] = { &img_uptime, &img_idle };
+    for (int k = 0; k < 2; k++) {
+        lv_obj_t* l = *tot_lbl[k] = lv_label_create(usage_container);
+        lv_label_set_text(l, "");
+        lv_obj_set_style_text_font(l, &font_styrene_14, 0);
+        themed_text(l, TH_DIM);
+        lv_obj_clear_flag(l, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_t* im = *tot_img[k] = lv_image_create(usage_container);
+        lv_image_set_src(im, &totals_icon_dsc[k]);
+        themed_icon(im, TH_TEXT);                // the last tool's colour
+        lv_obj_clear_flag(im, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_flag(im, LV_OBJ_FLAG_HIDDEN);
+        if (L.pet_home) {
+            lv_obj_set_pos(im, k ? tot_r - TOTALS_ICON : tot_l, L.activity.y + 1);
+            if (k) lv_obj_align(l, LV_ALIGN_TOP_RIGHT, -(L.w - tot_r), L.activity.y + 18);
+            else   lv_obj_set_pos(l, tot_l, L.activity.y + 18);
+        } else {
+            // No last-tool line here: the icon goes straight over its figure.
+            lv_obj_align(l, k ? LV_ALIGN_BOTTOM_RIGHT : LV_ALIGN_BOTTOM_LEFT, k ? -(L.w - tot_r) : tot_l, -4);
+            lv_obj_align(im, k ? LV_ALIGN_BOTTOM_RIGHT : LV_ALIGN_BOTTOM_LEFT, k ? -(L.w - tot_r) : tot_l, -22);
+        }
+    }
 
     // Usage panels (shown when connected) live in a transparent full-size group
     // so they can be toggled against the pairing hint as one unit.
@@ -1148,7 +1210,15 @@ void ui_tick_anim(void) {
     totals_line(true, now, totals, sizeof(totals));
     if (strcmp(totals, shown_totals) != 0) {
         snprintf(shown_totals, sizeof(shown_totals), "%s", totals);
-        lv_label_set_text(lbl_totals, totals);
+        char up[16] = "", idle[16] = "";
+        if (totals_known()) {
+            totals_fmt(totals_uptime_min(now), up, sizeof(up));
+            totals_fmt(totals_idle_min(now), idle, sizeof(idle));
+        }
+        lv_label_set_text(lbl_uptime, up);
+        lv_label_set_text(lbl_idle, idle);
+        lv_obj_set_flag(img_uptime, LV_OBJ_FLAG_HIDDEN, !totals_known());
+        lv_obj_set_flag(img_idle, LV_OBJ_FLAG_HIDDEN, !totals_known());
     }
 
     // Title clock: once the daemon has sent wall-clock time, replace "Usage" with

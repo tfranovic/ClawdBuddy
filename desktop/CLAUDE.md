@@ -341,6 +341,20 @@ runs or shows (bar the Accounts page's trial note).
 - Nothing competes for the serial port: the flasher (`ui/flasher.rs`) touches
   USB only while on screen (`set_active`), the Device page probes only while
   shown, and the sidebar locks while a board is being written.
+- Which release is offered (`clawdbuddy-flash/src/release.rs`): the daily
+  check (`tray::spawn_update_checker`) and the flasher's first look use
+  `release_for`: the latest release, or for a pre-release app its own tag
+  (with `unofficial_releases`, the newest of all). The flasher's "Check for
+  new versions" button (the board step, GitHub sources only) uses
+  `newest_release_for`, which also shows a pre-release app the pre-releases
+  after its own; a failed check keeps the release on screen. Every check
+  writes `<cache>/latest-release`, and the tray's snapshot reads that file
+  each time (its in-memory copy is only the fallback), so a window's check
+  shows as `latest_firmware` at once.
+- The board's version: `<cache>/device-firmware.json`, written by every USB
+  probe and every flash. The Device page shows the record before its own
+  last USB answer (a flash from the Flash page leaves that answer stale) and
+  probes again each time the page comes up.
 - App updates (`ui/update.rs`, `Page::Update`): when the daily check's tag
   (`StatusSnapshot::app_update`, or the check's cache file with no tray) is
   newer than a release build's version, the sidebar footer shows "Update

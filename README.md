@@ -297,7 +297,8 @@ then allow Bluetooth access. The app lives in the menu bar.
 
 Plug the board into your computer by its USB port. The app's setup offers to
 flash it: it downloads the firmware from the same release and writes it over
-USB. You can do this again later from the **Flash** page.
+USB. You can do this again later from the **Flash** page, where **Check for
+new versions** looks for a newer firmware at once.
 
 If the board is not found, hold **BOOT**, press and release **PWR** (the
 reset key on this board), release **BOOT**, and try again. Press **PWR**
@@ -378,7 +379,9 @@ then stays on what it has until an official release overtakes it.
 The app looks for a new release once a day. **Check for new versions** on
 the **Flash** page, beside the board it found, looks at once. An app that
 is itself a development build is then shown later development firmware too,
-whatever the switch says.
+whatever the switch says. What the check finds is offered everywhere else as
+well: the **Device** page names it beside the board's own version, and the
+sidebar offers the matching app.
 
 Version 0.1.0 has no such switch. To move from it to a development build,
 download that build's app from the releases page once; it then flashes the

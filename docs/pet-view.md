@@ -73,6 +73,21 @@ a tap that dismisses an alert counts as neither an answer nor a timeout.
 Stats are saved to flash (NVS namespace `pet`) on events only: an answer, a
 timeout, a level, a fed pip, and at most every ten minutes of napping.
 
+## Uptime and idle time
+
+The app counts two totals (`desktop/crates/clawdbuddy-core/src/totals.rs`)
+and sends them as `ut` ([protocol](protocol.md)):
+
+- **Uptime**: time the app was running and connected to the board.
+- **Idle**: the part of it with no session working. A session waiting for
+  you, or for its sub-agents, counts as working.
+
+A step of more than 30 seconds between two looks (the computer was asleep) is
+not counted. The totals are written to the `totals` file in the app's folder
+at most once a minute, so a crash loses under a minute. The firmware
+(`firmware/src/totals.cpp`, tested by `test_totals`) keeps nothing itself: it
+counts on from the last figures while the link is up.
+
 ## Files
 
 | File | Role |

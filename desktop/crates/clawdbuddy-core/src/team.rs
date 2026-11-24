@@ -624,6 +624,12 @@ fn derived_since(s: &Session, state: State, now: i64) -> i64 {
     }
 }
 
+/// No session is working: every desk is done, failed, idle or on a break, or
+/// there are none. The idle part of the app's uptime ([`crate::totals`]).
+pub fn nobody_working(desks: &[Desk]) -> bool {
+    desks.iter().all(|d| matches!(d.state, State::Done | State::Failed | State::Idle | State::Break))
+}
+
 /// Desks that would read the same get a number after the name, in the order
 /// they sit: `api`, `api 2`.
 fn number_twins(desks: &mut [Desk]) {

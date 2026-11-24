@@ -44,6 +44,7 @@ pub mod sessions;
 pub mod statusline;
 pub mod team;
 pub mod themes;
+pub mod totals;
 pub mod usage;
 
 pub use config::{ConfigFile, Settings};

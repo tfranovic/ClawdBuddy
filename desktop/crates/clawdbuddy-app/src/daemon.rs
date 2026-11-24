@@ -184,6 +184,7 @@ pub async fn run(paths: Paths, mut commands: mpsc::UnboundedReceiver<Command>, s
     let inbox = AttentionInbox::new(&paths.state_dir);
     let mut team = clawdbuddy_core::team::TeamTracker::new(&paths.state_dir);
     let mut logged_theme = String::new();
+    let mut totals = clawdbuddy_core::totals::Keeper::load(&paths.state_dir);
     let mut pet_mood = clawdbuddy_core::team::PetMood::default();
     let (mut tail, seed) = EventTail::open(paths.events_log());
     engine.seed_events(&seed);
@@ -287,6 +288,9 @@ pub async fn run(paths: Paths, mut commands: mpsc::UnboundedReceiver<Command>, s
             clawdbuddy_core::platform::idle_secs().is_some_and(|s| s >= clawdbuddy_core::platform::AWAY_AFTER_SECS);
         let mood = pet_mood.update(now, &office.desks, away);
         engine.set_pet(clawdbuddy_core::team::encode_pet(mood, clawdbuddy_core::team::pet_energy(&office.desks)));
+        let nobody_working = clawdbuddy_core::team::nobody_working(&office.desks);
+        totals.tick(now, matches!(link_state, LinkState::Connected { .. }), nobody_working);
+        engine.set_totals(totals.totals(), nobody_working);
         engine.set_team(office);
         engine.set_away(
             clawdbuddy_core::platform::idle_secs().map(|s| s >= clawdbuddy_core::platform::AWAY_AFTER_SECS),

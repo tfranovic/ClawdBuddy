@@ -59,6 +59,7 @@ struct UsageData {
     int8_t   pet_mood;       // `ps` first digit, 0-4: the pet's mood from the app; -1 = absent
     int8_t   pet_energy;     // `ps` second digit, 0-5; -1 = absent or `-` (the board's own rule)
     bool     pet_energy_own; // `ps` says the energy is the board's to work out
+    char     totals[28];     // `ut`: "<uptime s>,<idle s>,<i|w>" (totals.h); "" = absent
     int8_t   away;           // `aw` 1 = nobody is at the computer (an alert waits for
                              //      them instead of timing out), 0 = someone is; -1 = absent
     int8_t   pace_marker;    // `pm` 1 = pace marker on the usage bars, 0 = off; -1 = absent

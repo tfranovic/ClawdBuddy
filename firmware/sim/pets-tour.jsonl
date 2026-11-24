@@ -3,7 +3,7 @@
 #   SIM_FAST=1 SIM_SCENARIO=sim/pets-tour.jsonl \
 #   SIM_TAPS="6500@240,240;10500@440,400;12500@440,400;14500@40,400;17500@240,240" \
 #   .pio/build/sim/program
-{"name":"idle in the seat","hold_ms":5000,"s":22.0,"sr":240,"w":12.0,"wr":9000,"st":"allowed","ok":true,"t":1785474000,"tf":24,"a":0,"e":"s","es":1,"n":1}
+{"name":"idle in the seat","hold_ms":5000,"s":22.0,"sr":240,"w":12.0,"wr":9000,"st":"allowed","ok":true,"t":1785474000,"tf":24,"a":0,"e":"s","es":1,"n":1,"ut":"435900,187200,w"}
 {"name":"tap: peek, stats, species","hold_ms":17000,"s":23.0,"sr":239,"w":12.0,"wr":8999,"st":"allowed","ok":true,"a":1,"e":"p","es":2,"n":1,"t":1785474005,"tf":24}
 {"name":"permission alert","hold_ms":8000,"s":24.0,"sr":238,"w":12.0,"wr":8998,"st":"allowed","ok":true,"a":1,"e":"p","es":2,"n":2,"lt":"ClawdBuddy: Bash","m":"Permission: ClawdBuddy","b":true,"t":1785474022,"tf":24}
 {"name":"answered in the terminal","hold_ms":4000,"s":24.0,"sr":238,"w":12.0,"wr":8997,"st":"allowed","ok":true,"a":1,"e":"p","es":2,"n":2,"x":true,"t":1785474030,"tf":24}

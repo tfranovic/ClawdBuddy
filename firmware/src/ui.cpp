@@ -1,3 +1,4 @@
+#include "totals.h"
 #include "ui.h"
 #include "performer.h"
 #include "mascot.h"
@@ -9,6 +10,8 @@
 #include <stdio.h>
 #include <Arduino.h>
 #include "logo.h"
+
+LV_FONT_DECLARE(font_styrene_14);
 #include "clawd_still.h"
 #include "icons.h"
 #include "hal/board_caps.h"
@@ -71,6 +74,8 @@ static void themed_icon(lv_obj_t* obj, ThemeColor tok) {
 // ---- Usage screen widgets (single non-splash view) ----
 static lv_obj_t* usage_container;
 static lv_obj_t* lbl_title;
+static lv_obj_t* lbl_totals;     // top left: uptime/idle, "12h05m/3h20m"
+static char      shown_totals[40] = "";
 // Clock fed by the daemon: base epoch (local wall-clock seconds) + the lv_tick at
 // which it landed, so the title ticks forward locally between 60s payloads.
 static long     clock_base_epoch = 0;
@@ -623,6 +628,13 @@ static void init_usage_screen(lv_obj_t* scr) {
     themed_text(lbl_title, TH_TEXT);
     apply_title_font();
 
+    lbl_totals = lv_label_create(usage_container);
+    lv_label_set_text(lbl_totals, "");
+    lv_obj_set_style_text_font(lbl_totals, &font_styrene_14, 0);
+    themed_text(lbl_totals, TH_DIM);
+    lv_obj_clear_flag(lbl_totals, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_pos(lbl_totals, L.card[0].x, L.title_y[0] + 4);
+
     // Usage panels (shown when connected) live in a transparent full-size group
     // so they can be toggled against the pairing hint as one unit.
     usage_group = lv_obj_create(usage_container);
@@ -989,6 +1001,7 @@ void ui_update(const UsageData* data) {
     last_data = *data;
     have_last_data = true;
     last_data_ms = lv_tick_get();   // a real usage update just landed
+    totals_set(data->totals, last_data_ms);
     data_received = true;
 
     if (data->clock_epoch > 0) {    // daemon supplied wall-clock time → drive the title clock
@@ -1128,6 +1141,14 @@ void ui_tick_anim(void) {
 
     uint32_t now = lv_tick_get();
 
+    // Uptime and idle time, counted on from the app's last figures.
+    char totals[40];
+    totals_line(true, now, totals, sizeof(totals));
+    if (strcmp(totals, shown_totals) != 0) {
+        snprintf(shown_totals, sizeof(shown_totals), "%s", totals);
+        lv_label_set_text(lbl_totals, totals);
+    }
+
     // Title clock: once the daemon has sent wall-clock time, replace "Usage" with
     // the live time, advanced locally so it ticks every minute between payloads.
     if (clock_base_epoch > 0) {
@@ -1221,6 +1242,7 @@ void ui_update_ble_status(ble_state_t state, const char* name, const char* mac) 
     s_ble_connected = (state == BLE_STATE_CONNECTED);
 
     if (s_ble_connected && !was_connected) connected_at_ms = lv_tick_get();
+    if (s_ble_connected != was_connected) totals_link(s_ble_connected, lv_tick_get());
     // pair / idle / usage — picked from connection + data freshness.
     update_view_state();
 }

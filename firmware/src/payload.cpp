@@ -131,6 +131,7 @@ bool payload_parse(const char* json, UsageData* out, const char** err) {
     d.pet_mood = (ps[0] >= '0' && ps[0] <= '4') ? (int8_t)(ps[0] - '0') : -1;
     d.pet_energy = (ps[0] && ps[1] >= '0' && ps[1] <= '5') ? (int8_t)(ps[1] - '0') : -1;
     d.pet_energy_own = ps[0] && ps[1] == '-';
+    copy_str(d.totals, sizeof(d.totals), doc["ut"] | "");
     JsonVariant aw = doc["aw"];
     d.away = aw.isNull() ? -1 : (int8_t)((aw | 0) ? 1 : 0);
     JsonVariant pm = doc["pm"];

@@ -17,6 +17,7 @@
 #include "pet_hooks.h"
 #include "pet_stats_core.h"
 #include "pet_view.h"
+#include "../totals.h"
 #include <Arduino.h>
 #include <lvgl.h>
 #include <stdio.h>
@@ -43,6 +44,8 @@ static lv_obj_t* lbl_row[ROW_COUNT];
 static lv_obj_t* pips[ROW_COUNT][PET_FED_PIPS];
 static lv_obj_t* lbl_prev = NULL;
 static lv_obj_t* lbl_next = NULL;
+static lv_obj_t* lbl_totals = NULL;     // the bottom line: "Uptime: 12h05m / Idle: 3h20m"
+static char      shown_totals[48] = "\x01";
 static int       shown_vals[ROW_COUNT] = { -1, -1, -1 };
 static int       shown_level = -1, shown_species = -1;
 
@@ -111,6 +114,12 @@ static void refresh_stats(bool force) {
         for (int i = 0; i < ROW_PIPS[r]; i++)
             lv_obj_set_style_bg_color(pips[r][i], i < vals[r] ? row_color(r) : THEME_BAR_BG, 0);
     }
+    char totals[48];
+    totals_line(false, millis(), totals, sizeof(totals));
+    if (force || strcmp(totals, shown_totals) != 0) {
+        snprintf(shown_totals, sizeof(shown_totals), "%s", totals);
+        lv_label_set_text(lbl_totals, totals);
+    }
 }
 
 static lv_obj_t* make_label(lv_obj_t* parent, const lv_font_t* font, lv_color_t color) {
@@ -156,6 +165,13 @@ static void build_stats(int top) {
             pips[r][i] = p;
         }
     }
+
+    // The app's totals, along the bottom edge of the screen.
+    lbl_totals = make_label(stats_box, &font_styrene_14, THEME_DIM);
+    lv_obj_set_width(lbl_totals, W);
+    lv_obj_set_style_text_align(lbl_totals, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_text(lbl_totals, "");
+    lv_obj_align(lbl_totals, LV_ALIGN_BOTTOM_MID, 0, -2);
 
     // Where a tap changes the species.
     lbl_prev = make_label(stats_box, font, THEME_DIM);
@@ -323,6 +339,7 @@ void face_apply_theme(void) {
     lv_obj_set_style_text_color(lbl_title, THEME_TEXT, 0);
     lv_obj_set_style_text_color(lbl_prev, THEME_DIM, 0);
     lv_obj_set_style_text_color(lbl_next, THEME_DIM, 0);
+    lv_obj_set_style_text_color(lbl_totals, THEME_DIM, 0);
     for (int r = 0; r < ROW_COUNT; r++) lv_obj_set_style_text_color(lbl_row[r], THEME_DIM, 0);
     refresh_stats(true);
 }

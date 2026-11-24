@@ -27,6 +27,9 @@ pub const TEAM_MIN_INTERVAL: i64 = 2;
 /// `e`/`es` ride along for this long after the event (s), so a device that
 /// reconnects or reboots later doesn't react to an old event.
 pub const EVENT_FRESH_SECS: i64 = 60;
+/// The running totals (`ut`) are sent again this often; the device counts
+/// them on in between.
+pub const TOTALS_EVERY_SECS: i64 = 600;
 
 /// Why a write happens.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -164,6 +167,10 @@ pub struct Engine {
     /// The pet's mood and energy (`ps`).
     pet: Option<String>,
     sent_ps: Option<String>,
+    /// The running totals to send, and whether no session is working.
+    totals: Option<(crate::totals::Totals, bool)>,
+    /// The idle flag last sent with them, and when.
+    sent_ut: Option<(bool, i64)>,
     /// The newest status-line numbers taken as a reading, per account.
     status_at: HashMap<PathBuf, i64>,
     sent_tm: Option<String>,
@@ -238,6 +245,8 @@ impl Engine {
             sent_aw: None,
             pet: None,
             sent_ps: None,
+            totals: None,
+            sent_ut: None,
             status_at: HashMap::new(),
             sent_tm: None,
             sent_tm_at: 0,
@@ -381,6 +390,12 @@ impl Engine {
         self.away = away;
     }
 
+    /// The running totals ([`crate::totals::Keeper`]) and whether no session
+    /// is working now.
+    pub fn set_totals(&mut self, totals: crate::totals::Totals, idle: bool) {
+        self.totals = Some((totals, idle));
+    }
+
     /// The device says the user dismissed the alert there (or it timed out).
     pub fn on_device_dismissed(&mut self) {
         self.attention.dismissed();
@@ -403,6 +418,7 @@ impl Engine {
         self.sent_tx = None;
         self.sent_aw = None;
         self.sent_ps = None;
+        self.sent_ut = None;
         self.detail_want = None;
         self.sent_tv = None;
         self.sent_lv = None;
@@ -801,6 +817,12 @@ impl Engine {
         let aa = self.settings.attention_anim.seconds();
         let pm = u8::from(self.settings.pace_marker);
         let aw = self.away.map(u8::from);
+        // The device counts the totals on by itself: it needs them on
+        // connecting, when the idle flag turns, and now and then.
+        let ut = self.totals.filter(|(_, idle)| {
+            self.sent_ut.is_none_or(|(sent, at)| sent != *idle || !(0..TOTALS_EVERY_SECS).contains(&(now - at)))
+        });
+        let ut = ut.map(|(t, idle)| crate::totals::encode(t, idle));
         let k = self.settings.buttons.map(ButtonAction::code);
         let th = self.colors();
         let clock = clock_fields(self.settings.clock, utc(now), host.utc_offset_secs, host.prefers_12h);
@@ -811,6 +833,7 @@ impl Engine {
             || self.sent_tv != Some(tv)
             || (aw.is_some() && self.sent_aw != aw)
             || (hooks && self.pet.is_some() && self.sent_ps != self.pet)
+            || ut.is_some()
             || self.sent_k != Some(k)
             || self.sent_th != Some(th)
             || self.sent_tf != Some(tf);
@@ -855,6 +878,7 @@ impl Engine {
             p.pm = Some(pm);
             p.tv = Some(tv);
             p.ps = self.pet.clone().filter(|ps| hooks && self.sent_ps.as_ref() != Some(ps));
+            p.ut = ut;
             // The device keeps it: sent on a change, and while away.
             p.aw = aw.filter(|a| *a == 1 || self.sent_aw != Some(*a));
             if tv != 0 {
@@ -937,6 +961,9 @@ impl Engine {
         }
         if w.payload.ps.is_some() {
             self.sent_ps.clone_from(&w.payload.ps);
+        }
+        if let Some(ut) = &w.payload.ut {
+            self.sent_ut = Some((crate::totals::field_is_idle(ut), now));
         }
         if w.payload.aw.is_some() {
             self.sent_aw = w.payload.aw;

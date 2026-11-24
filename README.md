@@ -67,6 +67,14 @@ app's clock setting is on.
 **The pet.** One of 18 ASCII pets lives in the top left corner, with its
 name, level and three stats beside it.
 
+**Uptime and idle time.** The small figures in the top left corner
+(`121h05m/52h00m`) are how long the app has been running and connected to the
+board, and how much of that time no session was working (every session done,
+idle or on a break, or none open). The large pet's page spells them out
+along the bottom: `Uptime: 121h05m / Idle: 52h00m`. The app keeps the totals,
+so they carry on across restarts, updates, and a reset or a flash of the
+board. They need app and firmware 0.2.1 or newer.
+
 ![All 18 pets](docs/images/pets.png)
 
 What the pet does:
@@ -381,6 +389,8 @@ matching firmware.
   board and nowhere else.
 - **The status line** command keeps each session's context %, model, usage
   windows, cost and lines changed.
+- **The totals** (uptime and idle time) are two numbers in the `totals` file
+  in the app's folder.
 - **Claude Code's list of running sessions** (`~/.claude/sessions`) is read
   to see which sessions are still alive and whether each is busy, idle or
   waiting.

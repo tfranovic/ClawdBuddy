@@ -75,7 +75,7 @@ was working (every session done, idle or on a break, or none open). The
 large pet's page spells them out
 along the bottom: `Uptime: 121h05m / Idle: 52h00m`. The app keeps the totals,
 so they carry on across restarts, updates, and a reset or a flash of the
-board. They need app and firmware 0.2.1 or newer.
+board. They need app and firmware 0.3.0 or newer.
 
 ![All 18 pets](docs/images/pets.png)
 

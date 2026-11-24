@@ -48,6 +48,9 @@ pub struct StatusNumbers {
     pub cost_usd: Option<f64>,
     /// Lines added and removed in the session.
     pub lines: Option<(u64, u64)>,
+    /// Tokens the session has spent, as far as its status line saw
+    /// ([`digest_after`]): the sum of each reply's input and output.
+    pub tokens: Option<u64>,
 }
 
 fn window(v: Option<&Value>) -> Option<StatusWindow> {
@@ -58,12 +61,34 @@ fn window(v: Option<&Value>) -> Option<StatusWindow> {
 /// The file's text for one status-line input, and the session it is for.
 /// `None` without a session id.
 pub fn digest(input: &Value, now: i64) -> Option<(String, String)> {
+    digest_after(input, now, None)
+}
+
+/// [`digest`], counting the session's tokens on from `prev`, the file's
+/// text before this call.
+///
+/// Claude Code gives the latest reply's tokens only (`context_window`'s
+/// `total_input_tokens`, cached context included, and
+/// `total_output_tokens`), so the session's total is kept here: when the
+/// pair differs from the one in `prev`, a new reply has come and its tokens
+/// are added. A reply the status line never ran for is not counted.
+pub fn digest_after(input: &Value, now: i64, prev: Option<&str>) -> Option<(String, String)> {
     let sid = input.get("session_id")?.as_str()?;
     let safe = !sid.is_empty() && sid.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'));
     if !safe {
         return None;
     }
     let ctx = input.get("context_window").and_then(|c| c.get("used_percentage")).and_then(Value::as_f64);
+    let reply = |k: &str| input.get("context_window").and_then(|c| c.get(k)).and_then(Value::as_u64);
+    let reply = reply("total_input_tokens").zip(reply("total_output_tokens"));
+    let before: Option<Value> = prev.and_then(|t| serde_json::from_str(t).ok());
+    let before = |k: &str| before.as_ref().and_then(|v| v.get(k)).and_then(Value::as_u64);
+    let last = before("ti").zip(before("to"));
+    let tokens = match reply {
+        Some((i, o)) if Some((i, o)) != last => before("tok").unwrap_or(0).saturating_add(i).saturating_add(o),
+        _ => before("tok").unwrap_or(0),
+    };
+    let (ti, to) = reply.or(last).unzip();
     let limits = input.get("rate_limits");
     let win = |k: &str| window(limits.and_then(|l| l.get(k))).map(|w| json!({ "pct": w.pct, "reset": w.resets_at }));
     let cost = input.get("cost");
@@ -83,6 +108,9 @@ pub fn digest(input: &Value, now: i64) -> Option<(String, String)> {
         "cost": cost.and_then(|c| c.get("total_cost_usd")).and_then(Value::as_f64),
         "la": cost.and_then(|c| c.get("total_lines_added")).and_then(Value::as_u64),
         "lr": cost.and_then(|c| c.get("total_lines_removed")).and_then(Value::as_u64),
+        "tok": tokens,
+        "ti": ti,
+        "to": to,
     });
     Some((sid.to_owned(), out.to_string() + "\n"))
 }
@@ -122,6 +150,7 @@ pub fn parse(text: &str) -> Option<StatusNumbers> {
         config_dir: v.get("dir").and_then(Value::as_str).map(PathBuf::from),
         cost_usd: v.get("cost").and_then(Value::as_f64),
         lines: v.get("la").and_then(Value::as_u64).zip(v.get("lr").and_then(Value::as_u64)),
+        tokens: v.get("tok").and_then(Value::as_u64),
     })
 }
 
@@ -183,6 +212,33 @@ mod tests {
         assert_eq!(n.seven_day.unwrap().resets_at, 9000);
         assert_eq!(n.config_dir.as_deref(), Some(Path::new("/home/u/.claude")));
         assert_eq!(n.lines, Some((120, 7)));
+    }
+
+    #[test]
+    fn tokens_add_up_reply_by_reply() {
+        let with = |i: u64, o: u64| {
+            let mut v = input();
+            v["context_window"]["total_input_tokens"] = json!(i);
+            v["context_window"]["total_output_tokens"] = json!(o);
+            v
+        };
+        // The first reply seen.
+        let (_, a) = digest_after(&with(50_000, 800), 1, None).unwrap();
+        assert_eq!(parse(&a).unwrap().tokens, Some(50_800));
+        // The status line runs again for the same reply: nothing is added.
+        let (_, b) = digest_after(&with(50_000, 800), 2, Some(&a)).unwrap();
+        assert_eq!(parse(&b).unwrap().tokens, Some(50_800));
+        // A new reply.
+        let (_, c) = digest_after(&with(51_000, 300), 3, Some(&b)).unwrap();
+        assert_eq!(parse(&c).unwrap().tokens, Some(102_100));
+        // An input without the figures keeps the count and the last pair.
+        let (_, d) = digest_after(&input(), 4, Some(&c)).unwrap();
+        assert_eq!(parse(&d).unwrap().tokens, Some(102_100));
+        let (_, e) = digest_after(&with(51_000, 300), 5, Some(&d)).unwrap();
+        assert_eq!(parse(&e).unwrap().tokens, Some(102_100));
+        // A file that does not read starts the session's count again.
+        let (_, f) = digest_after(&with(10, 5), 6, Some("junk")).unwrap();
+        assert_eq!(parse(&f).unwrap().tokens, Some(15));
     }
 
     #[test]

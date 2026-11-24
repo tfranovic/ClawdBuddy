@@ -151,6 +151,11 @@ pub struct Payload {
     /// firmware ignores it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ut: Option<String>,
+    /// Tokens spent ([`crate::totals::encode_tokens`]): `<this week>,<ever>`.
+    /// Sent on connecting and, at most once a minute, when it has changed.
+    /// Dropped with `ut`. Older firmware ignores it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tk: Option<String>,
     /// 1 = nobody is at the computer (no input for a while): the device
     /// holds an alert instead of timing it out. Sent when it changes and
     /// while it is 1 (the device keeps the last value); the first field
@@ -182,8 +187,8 @@ pub struct Payload {
 /// Every key [`Payload`] can emit, in serialization order.
 pub const PAYLOAD_KEYS: &[&str] = &[
     "s", "sr", "w", "wr", "wf", "st", "acct", "pv", "rc", "rx", "tp", "pd", "rd", "t", "tf", "c", "ok", "b", "m", "x",
-    "a", "e", "es", "n", "lt", "rp", "lv", "aa", "pm", "tv", "tm", "tx", "td", "ps", "ut", "aw", "k1", "k2", "k3",
-    "th", "fc",
+    "a", "e", "es", "n", "lt", "rp", "lv", "aa", "pm", "tv", "tm", "tx", "td", "ps", "ut", "tk", "aw", "k1", "k2",
+    "k3", "th", "fc",
 ];
 
 /// The fast-clock keys added in v0.4 (old firmware ignores them).
@@ -401,10 +406,11 @@ impl Payload {
     pub fn encode(&self, limit: usize) -> Vec<u8> {
         let mut data = self.to_json().into_bytes();
         let mut p = self.clone();
-        if data.len() > limit && (p.aw.is_some() || p.ps.is_some() || p.ut.is_some()) {
+        if data.len() > limit && (p.aw.is_some() || p.ps.is_some() || p.ut.is_some() || p.tk.is_some()) {
             p.aw = None;
             p.ps = None;
             p.ut = None;
+            p.tk = None;
             data = p.to_json().into_bytes();
         }
         if data.len() > limit && p.lt.is_some() {
@@ -745,6 +751,7 @@ mod tests {
             aw: None,
             ps: None,
             ut: None,
+            tk: None,
             k1: Some(chord),
             k2: Some(chord),
             k3: Some(chord),
@@ -795,6 +802,7 @@ mod tests {
             aw: Some(0),
             ps: Some("42".into()),
             ut: Some("4294967,4294967,w".into()),
+            tk: Some("12400000,148000000".into()),
             k1: Some(1),
             k2: Some(2),
             k3: Some(6),

@@ -20,9 +20,57 @@ static void advance(uint32_t now_ms) {
     }
 }
 
+static bool     tok_known = false;
+static uint64_t tok_week = 0, tok_total = 0;
+
 void totals_reset(void) {
     known = live = idle_now = false;
     up_s = idle_s = base_ms = 0;
+    tok_known = false;
+    tok_week = tok_total = 0;
+}
+
+void totals_tokens_set(const char* tk) {
+    if (!tk || !*tk) return;
+    char* end = NULL;
+    const unsigned long long w = strtoull(tk, &end, 10);
+    if (end == tk || *end != ',') return;
+    const char* p = end + 1;
+    const unsigned long long t = strtoull(p, &end, 10);
+    if (end == p || *end != 0 || w > t) return;
+    tok_week = w;
+    tok_total = t;
+    tok_known = true;
+}
+
+bool totals_tokens_known(void) { return tok_known; }
+
+void totals_tokens_fmt(uint64_t n, char* buf, size_t len) {
+    static const char UNITS[] = { 'K', 'M', 'B', 'T' };
+    if (n < 1000) {
+        snprintf(buf, len, "%u", (unsigned)n);
+        return;
+    }
+    uint64_t unit = 1000;
+    int u = 0;
+    while (u < 3 && n >= unit * 1000) {
+        unit *= 1000;
+        u++;
+    }
+    const uint64_t whole = n / unit;
+    // Cut, not rounded: 999 950 reads 999K, never 1000K.
+    if (whole < 100) snprintf(buf, len, "%u.%u%c", (unsigned)whole, (unsigned)(n % unit / (unit / 10)), UNITS[u]);
+    else             snprintf(buf, len, "%u%c", (unsigned)whole, UNITS[u]);
+}
+
+void totals_tokens_line(bool short_form, char* buf, size_t len) {
+    if (len) buf[0] = 0;
+    if (!tok_known) return;
+    char w[12], t[12];
+    totals_tokens_fmt(tok_week, w, sizeof(w));
+    totals_tokens_fmt(tok_total, t, sizeof(t));
+    if (short_form) snprintf(buf, len, "%s wk / %s", w, t);
+    else            snprintf(buf, len, "%s week / %s total", w, t);
 }
 
 void totals_set(const char* ut, uint32_t now_ms) {

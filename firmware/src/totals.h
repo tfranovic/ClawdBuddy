@@ -19,5 +19,12 @@ uint32_t totals_uptime_min(uint32_t now_ms);
 uint32_t totals_idle_min(uint32_t now_ms);
 // "12h05m".
 void     totals_fmt(uint32_t minutes, char* buf, size_t len);
+// Tokens spent (`tk`): "<this week>,<ever>". Anything else is ignored.
+void     totals_tokens_set(const char* tk);
+bool     totals_tokens_known(void);
+// "832", "12.4K", "148M", "1.3B": one decimal under 100 of the unit.
+void     totals_tokens_fmt(uint64_t n, char* buf, size_t len);
+// "12.4M wk / 148M" (short) or "12.4M week / 148M total"; "" when unknown.
+void     totals_tokens_line(bool short_form, char* buf, size_t len);
 // "12h05m/3h20m" (short) or "Uptime: 12h05m / Idle: 3h20m"; "" when unknown.
 void     totals_line(bool short_form, uint32_t now_ms, char* buf, size_t len);

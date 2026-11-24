@@ -1066,6 +1066,7 @@ void ui_update(const UsageData* data) {
     have_last_data = true;
     last_data_ms = lv_tick_get();   // a real usage update just landed
     totals_set(data->totals, last_data_ms);
+    totals_tokens_set(data->tokens);
     data_received = true;
 
     if (data->clock_epoch > 0) {    // daemon supplied wall-clock time → drive the title clock

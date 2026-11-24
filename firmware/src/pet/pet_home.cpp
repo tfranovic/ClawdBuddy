@@ -5,6 +5,7 @@
 #include "pet_stats_core.h"
 #include "../theme.h"
 #include "../signals.h"
+#include "../totals.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -17,7 +18,7 @@ static const char* const ROW_NAMES[ROW_COUNT] = { "mood", "fed", "energy" };
 
 #define PIP      12
 #define PIP_GAP  3
-#define ROW_H    28
+#define ROW_H    21      // four rows (the pips' three and the tokens) in the box
 #define LABEL_W  62      // "energy" in Styrene 16, and a gap
 
 static lv_obj_t* box = NULL;
@@ -30,6 +31,9 @@ static int       shown_level = -1, shown_species = -1;
 static lv_obj_t* lbl_sessions = NULL;   // the last row, under the last tool
 static lv_obj_t* lbl_tool = NULL;
 static char      shown_tool[36] = "\x01";
+static lv_obj_t* lbl_tokens_name = NULL;   // the fourth row: text where the others have pips
+static lv_obj_t* lbl_tokens = NULL;
+static char      shown_tokens[40] = "\x01";
 static int       shown_sessions = -2;
 
 static lv_color_t row_color(int row) {
@@ -71,6 +75,12 @@ static void refresh(bool force) {
         snprintf(shown_tool, sizeof(shown_tool), "%s", tool);
         lv_label_set_text(lbl_tool, tool);
     }
+    char tokens[40];
+    totals_tokens_line(true, tokens, sizeof(tokens));
+    if (force || strcmp(tokens, shown_tokens) != 0) {
+        snprintf(shown_tokens, sizeof(shown_tokens), "%s", tokens);
+        lv_label_set_text(lbl_tokens, tokens[0] ? tokens : "-");
+    }
     const int vals[ROW_COUNT] = { pet_mood(), pet_fed(), pet_energy() };
     for (int r = 0; r < ROW_COUNT; r++) {
         if (!force && vals[r] == shown_vals[r]) continue;
@@ -85,7 +95,7 @@ void pet_home_create(lv_obj_t* parent, int x, int y, int w, int ax, int ay, int 
     box = lv_obj_create(parent);
     lv_obj_remove_style_all(box);
     lv_obj_set_pos(box, x, y);
-    lv_obj_set_size(box, w, 32 + ROW_COUNT * ROW_H);
+    lv_obj_set_size(box, w, 34 + (ROW_COUNT + 1) * ROW_H);
     lv_obj_clear_flag(box, (lv_obj_flag_t)(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE));
 
     // The activity rows under the status word: one line each, cut with dots.
@@ -128,6 +138,13 @@ void pet_home_create(lv_obj_t* parent, int x, int y, int w, int ax, int ay, int 
             pips[r][i] = p;
         }
     }
+    const int ty = 34 + ROW_COUNT * ROW_H - (lv_font_get_line_height(&font_styrene_16) - PIP) / 2;
+    lbl_tokens_name = label(&font_styrene_16);
+    lv_label_set_text(lbl_tokens_name, "tokens");
+    lv_obj_set_pos(lbl_tokens_name, 0, ty);
+    lbl_tokens = label(&font_styrene_16);
+    lv_label_set_text(lbl_tokens, "");
+    lv_obj_set_pos(lbl_tokens, LABEL_W, ty);
     pet_home_repaint();
 }
 
@@ -137,6 +154,8 @@ void pet_home_repaint(void) {
     lv_obj_set_style_text_color(lbl_level, THEME_DIM, 0);
     lv_obj_set_style_text_color(lbl_sessions, THEME_DIM, 0);
     lv_obj_set_style_text_color(lbl_tool, THEME_TEXT, 0);
+    lv_obj_set_style_text_color(lbl_tokens_name, THEME_DIM, 0);
+    lv_obj_set_style_text_color(lbl_tokens, THEME_TEXT, 0);
     for (int r = 0; r < ROW_COUNT; r++) lv_obj_set_style_text_color(lbl_row[r], THEME_DIM, 0);
     refresh(true);
 }

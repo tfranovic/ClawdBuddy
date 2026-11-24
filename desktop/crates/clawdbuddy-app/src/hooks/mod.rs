@@ -455,7 +455,13 @@ fn touch_clear(v: &Value, dir: &Path) -> io::Result<()> {
 pub fn status_line(input: &str, state_dir: &Path, now_unix: u64) -> String {
     use clawdbuddy_core::statusline;
     let Ok(v) = serde_json::from_str::<Value>(input) else { return String::new() };
-    if let Some((sid, body)) = statusline::digest(&v, i64::try_from(now_unix).unwrap_or(0)) {
+    // The session's file as it stands: its token count is carried on.
+    let before = v
+        .get("session_id")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_')))
+        .and_then(|sid| fs::read_to_string(statusline::dir(state_dir).join(format!("{sid}.json"))).ok());
+    if let Some((sid, body)) = statusline::digest_after(&v, i64::try_from(now_unix).unwrap_or(0), before.as_deref()) {
         let dir = statusline::dir(state_dir);
         if fs::create_dir_all(&dir).is_ok() {
             let tmp = dir.join(format!("{sid}.{}", std::process::id()));

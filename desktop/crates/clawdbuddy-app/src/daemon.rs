@@ -291,6 +291,12 @@ pub async fn run(paths: Paths, mut commands: mpsc::UnboundedReceiver<Command>, s
         let nobody_working = clawdbuddy_core::team::nobody_working(&office.desks);
         totals.tick(now, matches!(link_state, LinkState::Connected { .. }), nobody_working);
         engine.set_totals(totals.totals(), nobody_working);
+        totals.count_tokens(
+            now,
+            clawdbuddy_core::totals::week_start(now + clawdbuddy_core::platform::utc_offset_secs()),
+            beside.status.iter().filter_map(|(sid, n)| Some((sid.as_str(), n.tokens?))),
+        );
+        engine.set_tokens(totals.tokens());
         engine.set_team(office);
         engine.set_away(
             clawdbuddy_core::platform::idle_secs().map(|s| s >= clawdbuddy_core::platform::AWAY_AFTER_SECS),

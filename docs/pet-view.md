@@ -13,7 +13,7 @@ On the 480×480 panel (`place_pet_home` in `firmware/src/layout.cpp`):
 | Area | What is there |
 | --- | --- |
 | Top left, 240×164 | The pet's whole canvas at 2× (`pet/pet_mascot.cpp`) |
-| Top right | The clock, when the app sends the time; under it the pet's name, level, and the mood, fed and energy pips (`pet/pet_home.cpp`) |
+| Top right | The clock, when the app sends the time; under it the pet's name, level, and the mood, fed and energy pips and the tokens row, `12.4M wk / 148M` (`pet/pet_home.cpp`) |
 | Middle | Two usage cards, 114 px tall |
 | Bottom | Three centred rows: the status word or the alert; the last session to run a tool (`lt`); the number of active sessions (`n`). The uptime and the idle time (`ut`) stand at the left and right ends of the last row, each under a 16 px icon (a clock, a moon; drawn in `ui.cpp`) on the row above, which is cut short of them |
 
@@ -87,6 +87,28 @@ not counted. The totals are written to the `totals` file in the app's folder
 at most once a minute, so a crash loses under a minute. The firmware
 (`firmware/src/totals.cpp`, tested by `test_totals`) keeps nothing itself: it
 counts on from the last figures while the link is up.
+
+## Tokens
+
+Claude Code's status-line input has the latest reply's tokens only
+(`context_window.total_input_tokens`, cached context included, and
+`total_output_tokens`). `clawdbuddy hook statusline` keeps a count per
+session in its `statusline/<session id>.json`: when the pair differs from the
+last one it saw, a new reply has come and both are added
+(`statusline::digest_after`). The app adds each session's growth to two
+figures in the `totals` file, the week's (from Monday 00:00 local time) and
+the one for ever, and remembers how far it has counted each session, so a
+restart adds nothing twice (`totals::Keeper::count_tokens`). They go out as
+`tk` ([protocol](protocol.md)).
+
+It is an estimate. The status line does not run for every reply of a long
+tool loop, and what sub-agents spend is not in it. The firmware
+(`totals.cpp`) only formats: `832`, `12.4K`, `148M`, `1.3B`, cut, never
+rounded up.
+
+Both stat blocks made room for the row: the large pet's rows are set in the
+16 px font at a 32 px pitch (the title stays 20 px), the meters' at a 21 px
+pitch.
 
 ## Files
 

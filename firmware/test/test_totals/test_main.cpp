@@ -51,10 +51,35 @@ static void test_counts_on_while_linked(void) {
     TEST_ASSERT_EQUAL_UINT32(8, totals_idle_min(4201000 + 60000));
 }
 
+void test_tokens(void) {
+    char buf[40];
+    totals_tokens_line(false, buf, sizeof(buf));
+    TEST_ASSERT_EQUAL_STRING("", buf);
+    totals_tokens_set("junk");
+    totals_tokens_set("5,3");            // more this week than ever
+    totals_tokens_set("5,9,x");
+    TEST_ASSERT_FALSE(totals_tokens_known());
+    totals_tokens_set("12400000,148000000");
+    totals_tokens_line(false, buf, sizeof(buf));
+    TEST_ASSERT_EQUAL_STRING("12.4M week / 148M total", buf);
+    totals_tokens_line(true, buf, sizeof(buf));
+    TEST_ASSERT_EQUAL_STRING("12.4M wk / 148M", buf);
+    const struct { uint64_t n; const char* s; } cases[] = {
+        { 0, "0" }, { 832, "832" }, { 1000, "1.0K" }, { 12499, "12.4K" }, { 999950, "999K" },
+        { 1000000, "1.0M" }, { 1310000000ULL, "1.3B" }, { 5000000000ULL, "5.0B" },
+        { 2500000000000ULL, "2.5T" }, { 4000000000000000ULL, "4000T" },
+    };
+    for (const auto& c : cases) {
+        totals_tokens_fmt(c.n, buf, sizeof(buf));
+        TEST_ASSERT_EQUAL_STRING(c.s, buf);
+    }
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_unknown_until_set);
     RUN_TEST(test_formats);
     RUN_TEST(test_counts_on_while_linked);
+    RUN_TEST(test_tokens);
     return UNITY_END();
 }

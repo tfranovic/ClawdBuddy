@@ -30,6 +30,8 @@ pub const EVENT_FRESH_SECS: i64 = 60;
 /// The running totals (`ut`) are sent again this often; the device counts
 /// them on in between.
 pub const TOTALS_EVERY_SECS: i64 = 600;
+/// A changed token count (`tk`) is sent at most this often.
+pub const TOKENS_MIN_INTERVAL: i64 = 60;
 
 /// Why a write happens.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -171,6 +173,10 @@ pub struct Engine {
     totals: Option<(crate::totals::Totals, bool)>,
     /// The idle flag last sent with them, and when.
     sent_ut: Option<(bool, i64)>,
+    /// The tokens spent to send ([`crate::totals::Tokens`]), and the `tk`
+    /// last sent with when.
+    tokens: Option<crate::totals::Tokens>,
+    sent_tk: Option<(String, i64)>,
     /// The newest status-line numbers taken as a reading, per account.
     status_at: HashMap<PathBuf, i64>,
     sent_tm: Option<String>,
@@ -247,6 +253,8 @@ impl Engine {
             sent_ps: None,
             totals: None,
             sent_ut: None,
+            tokens: None,
+            sent_tk: None,
             status_at: HashMap::new(),
             sent_tm: None,
             sent_tm_at: 0,
@@ -396,6 +404,11 @@ impl Engine {
         self.totals = Some((totals, idle));
     }
 
+    /// The tokens spent, this week and ever ([`crate::totals::Keeper`]).
+    pub fn set_tokens(&mut self, tokens: crate::totals::Tokens) {
+        self.tokens = Some(tokens);
+    }
+
     /// The device says the user dismissed the alert there (or it timed out).
     pub fn on_device_dismissed(&mut self) {
         self.attention.dismissed();
@@ -419,6 +432,7 @@ impl Engine {
         self.sent_aw = None;
         self.sent_ps = None;
         self.sent_ut = None;
+        self.sent_tk = None;
         self.detail_want = None;
         self.sent_tv = None;
         self.sent_lv = None;
@@ -823,6 +837,12 @@ impl Engine {
             self.sent_ut.is_none_or(|(sent, at)| sent != *idle || !(0..TOTALS_EVERY_SECS).contains(&(now - at)))
         });
         let ut = ut.map(|(t, idle)| crate::totals::encode(t, idle));
+        // Tokens move with every reply: they ride along with a write that
+        // goes out anyway, a minute apart at least, and only ask for one
+        // of their own when the device has none yet.
+        let tk = self.tokens.map(crate::totals::encode_tokens).filter(|tk| {
+            self.sent_tk.as_ref().is_none_or(|(sent, at)| sent != tk && !(0..TOKENS_MIN_INTERVAL).contains(&(now - at)))
+        });
         let k = self.settings.buttons.map(ButtonAction::code);
         let th = self.colors();
         let clock = clock_fields(self.settings.clock, utc(now), host.utc_offset_secs, host.prefers_12h);
@@ -834,6 +854,7 @@ impl Engine {
             || (aw.is_some() && self.sent_aw != aw)
             || (hooks && self.pet.is_some() && self.sent_ps != self.pet)
             || ut.is_some()
+            || (tk.is_some() && self.sent_tk.is_none())
             || self.sent_k != Some(k)
             || self.sent_th != Some(th)
             || self.sent_tf != Some(tf);
@@ -879,6 +900,7 @@ impl Engine {
             p.tv = Some(tv);
             p.ps = self.pet.clone().filter(|ps| hooks && self.sent_ps.as_ref() != Some(ps));
             p.ut = ut;
+            p.tk = tk;
             // The device keeps it: sent on a change, and while away.
             p.aw = aw.filter(|a| *a == 1 || self.sent_aw != Some(*a));
             if tv != 0 {
@@ -961,6 +983,9 @@ impl Engine {
         }
         if w.payload.ps.is_some() {
             self.sent_ps.clone_from(&w.payload.ps);
+        }
+        if let Some(tk) = &w.payload.tk {
+            self.sent_tk = Some((tk.clone(), now));
         }
         if let Some(ut) = &w.payload.ut {
             self.sent_ut = Some((crate::totals::field_is_idle(ut), now));

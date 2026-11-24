@@ -65,7 +65,7 @@ app's clock setting is on.
 3. The number of sessions active in the last 5 minutes.
 
 **The pet.** One of 18 ASCII pets lives in the top left corner, with its
-name, level and three stats beside it.
+name, level and three stats beside it, and under them the tokens spent.
 
 **Uptime and idle time.** The two small figures in the bottom corners,
 either side of the session count, each under its icon: on the left, under
@@ -76,6 +76,16 @@ large pet's page spells them out
 along the bottom: `Uptime: 121h05m / Idle: 52h00m`. The app keeps the totals,
 so they carry on across restarts, updates, and a reset or a flash of the
 board. They need app and firmware 0.3.0 or newer.
+
+**Tokens.** The `tokens` row under the pet's stats is how many tokens your
+Claude Code sessions have spent this week (from Monday) and in all:
+`12.4M wk / 148M`, or `12.4M week / 148M total` on the large pet's page. A
+reply's tokens are everything it read, cached context included, plus what it
+wrote, so the figure grows fast. It is counted from what Claude Code tells
+the status line after each reply, which makes it an estimate: a reply the
+status line never ran for is missed, and sessions without ClawdBuddy's
+status line are not counted at all. Kept by the app like the two times
+above. Needs app and firmware 0.3.1 or newer.
 
 ![All 18 pets](docs/images/pets.png)
 
@@ -398,9 +408,9 @@ matching firmware.
   title is text Claude Code wrote about the conversation; it goes to the
   board and nowhere else.
 - **The status line** command keeps each session's context %, model, usage
-  windows, cost and lines changed.
-- **The totals** (uptime and idle time) are two numbers in the `totals` file
-  in the app's folder.
+  windows, cost, lines changed and a count of tokens spent.
+- **The totals** (uptime, idle time, and tokens spent this week and in all)
+  are a few numbers in the `totals` file in the app's folder.
 - **Claude Code's list of running sessions** (`~/.claude/sessions`) is read
   to see which sessions are still alive and whether each is busy, idle or
   waiting.

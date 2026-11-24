@@ -23,6 +23,7 @@
 #include <stdio.h>
 
 LV_FONT_DECLARE(font_styrene_20);
+LV_FONT_DECLARE(font_styrene_16);
 LV_FONT_DECLARE(font_styrene_14);
 
 #define RISE_MS   420
@@ -44,8 +45,11 @@ static lv_obj_t* lbl_row[ROW_COUNT];
 static lv_obj_t* pips[ROW_COUNT][PET_FED_PIPS];
 static lv_obj_t* lbl_prev = NULL;
 static lv_obj_t* lbl_next = NULL;
+static lv_obj_t* lbl_tokens_name = NULL;
+static lv_obj_t* lbl_tokens = NULL;     // "12.4M week / 148M total"
 static lv_obj_t* lbl_totals = NULL;     // the bottom line: "Uptime: 12h05m / Idle: 3h20m"
 static char      shown_totals[48] = "\x01";
+static char      shown_tokens[40] = "\x01";
 static int       shown_vals[ROW_COUNT] = { -1, -1, -1 };
 static int       shown_level = -1, shown_species = -1;
 
@@ -114,6 +118,13 @@ static void refresh_stats(bool force) {
         for (int i = 0; i < ROW_PIPS[r]; i++)
             lv_obj_set_style_bg_color(pips[r][i], i < vals[r] ? row_color(r) : THEME_BAR_BG, 0);
     }
+    char tokens[40];
+    totals_tokens_line(false, tokens, sizeof(tokens));
+    if (force || strcmp(tokens, shown_tokens) != 0) {
+        snprintf(shown_tokens, sizeof(shown_tokens), "%s", tokens);
+        // Nothing counted yet (an older app): a dash, not an empty row.
+        lv_label_set_text(lbl_tokens, tokens[0] ? tokens : "-");
+    }
     char totals[48];
     totals_line(false, millis(), totals, sizeof(totals));
     if (force || strcmp(totals, shown_totals) != 0) {
@@ -133,7 +144,9 @@ static lv_obj_t* make_label(lv_obj_t* parent, const lv_font_t* font, lv_color_t 
 static void build_stats(int top) {
     const int mind = W < H ? W : H;
     const lv_font_t* font = mind >= 400 ? &font_styrene_20 : &font_styrene_14;
-    const int rh = mind / 12;                     // row pitch
+    // The rows are a size down from the title, so a fourth (tokens) fits.
+    const lv_font_t* row_font = mind >= 400 ? &font_styrene_16 : &font_styrene_14;
+    const int rh = mind / 15;                     // row pitch
     const int pip = rh / 2, gap = pip / 3 > 0 ? pip / 3 : 1;
     const int label_x = W * 14 / 100, pips_x = W * 40 / 100;
 
@@ -150,9 +163,9 @@ static void build_stats(int top) {
 
     for (int r = 0; r < ROW_COUNT; r++) {
         const int y = rh * (r + 1) + rh / 4;
-        lbl_row[r] = make_label(stats_box, font, THEME_DIM);
+        lbl_row[r] = make_label(stats_box, row_font, THEME_DIM);
         lv_label_set_text(lbl_row[r], ROW_NAMES[r]);
-        lv_obj_set_pos(lbl_row[r], label_x, y - (lv_font_get_line_height(font) - pip) / 2);
+        lv_obj_set_pos(lbl_row[r], label_x, y - (lv_font_get_line_height(row_font) - pip) / 2);
         for (int i = 0; i < ROW_PIPS[r]; i++) {
             lv_obj_t* p = lv_obj_create(stats_box);
             lv_obj_remove_style_all(p);
@@ -164,6 +177,17 @@ static void build_stats(int top) {
             lv_obj_clear_flag(p, (lv_obj_flag_t)(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE));
             pips[r][i] = p;
         }
+    }
+
+    // Tokens: a row of text where the others have pips.
+    {
+        const int y = rh * (ROW_COUNT + 1) + rh / 4 - (lv_font_get_line_height(row_font) - pip) / 2;
+        lbl_tokens_name = make_label(stats_box, row_font, THEME_DIM);
+        lv_label_set_text(lbl_tokens_name, "tokens");
+        lv_obj_set_pos(lbl_tokens_name, label_x, y);
+        lbl_tokens = make_label(stats_box, row_font, THEME_TEXT);
+        lv_label_set_text(lbl_tokens, "");
+        lv_obj_set_pos(lbl_tokens, pips_x, y);
     }
 
     // The app's totals, along the bottom edge of the screen.
@@ -190,7 +214,7 @@ static void layout_for(bool with_stats) {
     const int x = (W - pet_view_w(&view)) / 2;
     const int body_mid = (PET_BODY_TOP + PET_FEET_Y) / 2 * s;
     const int stats_top = PET_FEET_Y * s + H / 30;
-    const bool room = stats_box && stats_top + (H / 12) * (ROW_COUNT + 1) <= H;
+    const bool room = stats_box && stats_top + (H / 15) * (ROW_COUNT + 2) <= H;
     if (with_stats && room) {
         lv_obj_set_pos(view.img, x, 0);
         lv_obj_set_y(stats_box, stats_top);
@@ -340,6 +364,8 @@ void face_apply_theme(void) {
     lv_obj_set_style_text_color(lbl_prev, THEME_DIM, 0);
     lv_obj_set_style_text_color(lbl_next, THEME_DIM, 0);
     lv_obj_set_style_text_color(lbl_totals, THEME_DIM, 0);
+    lv_obj_set_style_text_color(lbl_tokens_name, THEME_DIM, 0);
+    lv_obj_set_style_text_color(lbl_tokens, THEME_TEXT, 0);
     for (int r = 0; r < ROW_COUNT; r++) lv_obj_set_style_text_color(lbl_row[r], THEME_DIM, 0);
     refresh_stats(true);
 }

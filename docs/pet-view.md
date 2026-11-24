@@ -15,7 +15,7 @@ On the 480×480 panel (`place_pet_home` in `firmware/src/layout.cpp`):
 | Top left, 240×164 | The pet's whole canvas at 2× (`pet/pet_mascot.cpp`) |
 | Top right | The clock, when the app sends the time; under it the pet's name, level, and the mood, fed and energy pips (`pet/pet_home.cpp`) |
 | Middle | Two usage cards, 114 px tall |
-| Bottom | Three centred rows: the status word or the alert; the last session to run a tool (`lt`); the number of active sessions (`n`) |
+| Bottom | Three centred rows: the status word or the alert; the last session to run a tool (`lt`); the number of active sessions (`n`). At the left end of the last row, the uptime and idle time (`ut`) |
 
 ## The meters
 

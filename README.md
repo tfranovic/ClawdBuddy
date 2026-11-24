@@ -67,8 +67,8 @@ app's clock setting is on.
 **The pet.** One of 18 ASCII pets lives in the top left corner, with its
 name, level and three stats beside it.
 
-**Uptime and idle time.** The small figures in the top left corner
-(`121h05m/52h00m`) are how long the app has been running and connected to the
+**Uptime and idle time.** The small figures in the bottom left corner, on
+the line of the session count (`121h05m/52h00m`), are how long the app has been running and connected to the
 board, and how much of that time no session was working (every session done,
 idle or on a break, or none open). The large pet's page spells them out
 along the bottom: `Uptime: 121h05m / Idle: 52h00m`. The app keeps the totals,

@@ -74,7 +74,7 @@ static void themed_icon(lv_obj_t* obj, ThemeColor tok) {
 // ---- Usage screen widgets (single non-splash view) ----
 static lv_obj_t* usage_container;
 static lv_obj_t* lbl_title;
-static lv_obj_t* lbl_totals;     // top left: uptime/idle, "12h05m/3h20m"
+static lv_obj_t* lbl_totals;     // bottom left: uptime/idle, "12h05m/3h20m"
 static char      shown_totals[40] = "";
 // Clock fed by the daemon: base epoch (local wall-clock seconds) + the lv_tick at
 // which it landed, so the title ticks forward locally between 60s payloads.
@@ -633,7 +633,9 @@ static void init_usage_screen(lv_obj_t* scr) {
     lv_obj_set_style_text_font(lbl_totals, &font_styrene_14, 0);
     themed_text(lbl_totals, TH_DIM);
     lv_obj_clear_flag(lbl_totals, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_pos(lbl_totals, L.card[0].x, L.title_y[0] + 4);
+    // Bottom left, on the line of the session count (which stays centred).
+    if (L.pet_home) lv_obj_set_pos(lbl_totals, L.card[0].x, L.activity.y + 18);
+    else            lv_obj_align(lbl_totals, LV_ALIGN_BOTTOM_LEFT, L.card[0].x, -4);
 
     // Usage panels (shown when connected) live in a transparent full-size group
     // so they can be toggled against the pairing hint as one unit.

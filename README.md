@@ -375,6 +375,11 @@ like any other update: the app itself in the sidebar, the firmware on the
 **Flash** page. Turn it off to go back to official releases only; the app
 then stays on what it has until an official release overtakes it.
 
+The app looks for a new release once a day. **Check for new versions** on
+the **Flash** page, beside the board it found, looks at once. An app that
+is itself a development build is then shown later development firmware too,
+whatever the switch says.
+
 Version 0.1.0 has no such switch. To move from it to a development build,
 download that build's app from the releases page once; it then flashes the
 matching firmware.

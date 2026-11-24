@@ -369,6 +369,24 @@ pub fn release_for(repo: &str, app_version: &str, unofficial: bool) -> Result<Re
     release_for_with(repo, app_version, unofficial, get_string)
 }
 
+/// The newest release there is for an app at `app_version`, for a check the
+/// user asked for (the flasher's "Check for new versions"): as
+/// [`release_for`], but a pre-release app is also shown the pre-releases
+/// after its own. A stable app still needs the setting for those.
+pub fn newest_release_for(repo: &str, app_version: &str, unofficial: bool) -> Result<Release, ReleaseError> {
+    newest_release_for_with(repo, app_version, unofficial, get_string)
+}
+
+/// [`newest_release_for`] with the HTTP fetch injected (tests).
+fn newest_release_for_with(
+    repo: &str,
+    app_version: &str,
+    unofficial: bool,
+    fetch: impl Fn(&str) -> Result<String, ReleaseError>,
+) -> Result<Release, ReleaseError> {
+    release_for_with(repo, app_version, unofficial || is_prerelease(app_version), fetch)
+}
+
 /// [`release_for`] with the HTTP fetch injected (tests).
 fn release_for_with(
     repo: &str,
@@ -864,6 +882,31 @@ mod tests {
         };
         assert_eq!(release_for_with("o/r", "0.1.0", false, fetch).unwrap().tag, "v0.1.0");
         assert_eq!(release_for_with("o/r", "0.1.0", true, fetch).unwrap().tag, "v0.1.1-dev", "drafts never");
+    }
+
+    #[test]
+    fn a_check_asked_for_shows_a_prerelease_app_newer_prereleases() {
+        let fetch = |url: &str| -> Result<String, ReleaseError> {
+            match url {
+                "https://api.github.com/repos/o/r/releases?per_page=30" => Ok(r#"[
+                    {"tag_name":"v0.2.3-dev","prerelease":true},
+                    {"tag_name":"v0.2.2-dev","prerelease":true},
+                    {"tag_name":"v0.2.0"}]"#
+                    .into()),
+                "https://api.github.com/repos/o/r/releases/tags/v0.2.3-dev" => Ok(api("v0.2.3-dev")),
+                "https://api.github.com/repos/o/r/releases/tags/v0.2.2-dev" => Ok(api("v0.2.2-dev")),
+                "https://api.github.com/repos/o/r/releases/latest" => Ok(api("v0.2.0")),
+                u if u.ends_with("/manifest.json") => Ok(MANIFEST.into()),
+                other => panic!("unexpected fetch {other}"),
+            }
+        };
+        // The daily check: the app's own tag.
+        assert_eq!(release_for_with("o/r", "0.2.2-dev", false, fetch).unwrap().tag, "v0.2.2-dev");
+        // The button: the newest of all for a pre-release app, the latest
+        // release for a stable one.
+        assert_eq!(newest_release_for_with("o/r", "0.2.2-dev", false, fetch).unwrap().tag, "v0.2.3-dev");
+        assert_eq!(newest_release_for_with("o/r", "0.2.0", false, fetch).unwrap().tag, "v0.2.0");
+        assert_eq!(newest_release_for_with("o/r", "0.2.0", true, fetch).unwrap().tag, "v0.2.3-dev");
     }
 
     #[test]

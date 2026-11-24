@@ -546,7 +546,10 @@ impl TrayApp {
         let status = self.daemon.as_ref().map(|d| d.status.borrow().clone()).unwrap_or_default();
         let mut snap = StatusSnapshot::from_status(&status, now);
         snap.windowed = !self.use_tray;
-        snap.latest_firmware = self.latest.lock().ok().and_then(|l| l.clone());
+        // The cache file first: a window's own check (the flasher's) writes
+        // it too, and what it found shows here at once.
+        snap.latest_firmware =
+            ipc::load_latest_release(&self.paths).or_else(|| self.latest.lock().ok().and_then(|l| l.clone()));
         snap.device_firmware = ipc::load_firmware_record(&self.paths).map(|r| r.ver);
         // Debug builds only: `CLAWDBUDDY_DEMO_FIRMWARE_UPDATE=1.9.0` acts as if
         // that release were out and the board older, to see the update icon

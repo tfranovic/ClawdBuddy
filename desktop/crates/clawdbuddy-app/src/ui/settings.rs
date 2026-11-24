@@ -230,7 +230,9 @@ impl SettingsView {
         self.sync_appearance();
         self.embedded = embedded;
         self.reload();
-        if page == Page::Device && self.usb && !self.device.probing && self.device.port.is_none() {
+        // Every time the page comes up: the board may have been flashed since
+        // it was last asked.
+        if page == Page::Device && self.usb && !self.device.probing {
             self.probe_device(cx);
         }
         cx.notify();
@@ -557,13 +559,14 @@ impl SettingsView {
     fn device_pane(&mut self, t: &Theme, cx: &mut Context<Self>) -> gpui::Div {
         let snap = self.snap.clone();
         let rec = ipc::load_firmware_record(&self.paths);
-        let env = self.device.info.as_ref().map(|i| i.env.clone()).or_else(|| rec.as_ref().map(|r| r.env.clone()));
-        let ver = self
-            .device
-            .info
+        // The record first: every probe and every flash writes it, so it is
+        // never older than this page's own last USB answer (which a flash
+        // from the Flash page leaves behind).
+        let env = rec.as_ref().map(|r| r.env.clone()).or_else(|| self.device.info.as_ref().map(|i| i.env.clone()));
+        let ver = rec
             .as_ref()
-            .map(|i| i.ver.clone())
-            .or_else(|| rec.as_ref().map(|r| r.ver.clone()))
+            .map(|r| r.ver.clone())
+            .or_else(|| self.device.info.as_ref().map(|i| i.ver.clone()))
             .or_else(|| snap.as_ref().and_then(|s| s.device_firmware.clone()));
         let board = env.as_deref().and_then(boards::board);
         let name: SharedString = match (board, &env) {

@@ -177,6 +177,10 @@ pub struct FlasherView {
     details: bool,
     /// `None` while checking; `Err((message, no_release_yet))`.
     source: Option<Result<Source, (String, bool)>>,
+    /// "Check for new versions" is looking; the release on screen stays.
+    checking: bool,
+    /// What that check came to, when it changed nothing: said under the hint.
+    check_note: Option<String>,
     port: Option<String>,
     probing: bool,
     info: Option<FirmwareInfo>,
@@ -270,6 +274,8 @@ impl FlasherView {
             shop: false,
             details: false,
             source: None,
+            checking: false,
+            check_note: None,
             port: None,
             probing: false,
             info: None,
@@ -386,6 +392,47 @@ impl FlasherView {
                 v.source = Some(r.map(Source::Remote));
                 if v.step == Step::Identify && v.candidates.is_empty() && !v.probing {
                     v.identify(cx);
+                }
+            },
+        );
+    }
+
+    /// "Check for new versions": look again for the newest release (for a
+    /// pre-release app, later pre-releases too) and offer it in place of the
+    /// one on screen. A check that fails leaves that one as it is.
+    fn check_versions(&mut self, cx: &mut Context<Self>) {
+        if self.checking {
+            return;
+        }
+        self.checking = true;
+        self.check_note = None;
+        let (repo, unofficial) = Settings::load(&self.paths)
+            .map(|s| (s.release_repo, s.unofficial_releases))
+            .unwrap_or_else(|_| (clawdbuddy_flash::DEFAULT_RELEASE_REPO.into(), false));
+        run_blocking(
+            cx,
+            move || {
+                release::newest_release_for(&repo, crate::version(), unofficial).map_err(|e| {
+                    log::warn!("release check for {repo}: {e} ({})", e.detail().unwrap_or_default());
+                    e.to_string()
+                })
+            },
+            |v, r, _| {
+                v.checking = false;
+                match r {
+                    Ok(rel) => {
+                        let _ = std::fs::create_dir_all(&v.paths.cache_dir);
+                        let _ = std::fs::write(ipc::latest_release_file(&v.paths), &rel.manifest.version);
+                        let had = v.source.as_ref().and_then(|s| s.as_ref().ok()).map(Source::version);
+                        let now = Source::Remote(rel);
+                        v.check_note = Some(if had.as_deref() == Some(now.version().as_str()) {
+                            format!("No newer version: {} is the latest.", now.version())
+                        } else {
+                            format!("Found {}.", now.version())
+                        });
+                        v.source = Some(Ok(now));
+                    }
+                    Err(e) => v.check_note = Some(format!("Couldn't check for new versions. {e}")),
                 }
             },
         );
@@ -852,11 +899,26 @@ impl FlasherView {
             );
         }
         d = d.child(grid);
+        if let Some(note) = &self.check_note {
+            d = d.child(caption(t, note.clone()));
+        }
         let (me1, me2) = (cx.entity().downgrade(), cx.entity().downgrade());
+        let me3 = cx.entity().downgrade();
+        // A release from GitHub can be looked for again; a local folder is
+        // what it is.
+        let remote = matches!(self.source, Some(Ok(Source::Remote(_))));
+        let checking = self.checking;
         // In setup, an up-to-date board moves straight on; flashing it again
         // stays possible.
         let skip = up_to_date && self.mode == FlashMode::Setup;
         let mut actions = div().flex().items_center().gap(px(8.));
+        if remote {
+            let label = if checking { "Checking…" } else { "Check for new versions" };
+            actions =
+                actions.child(button(t, "check-versions", label, ButtonKind::Small, !checking, move |_, _, cx| {
+                    let _ = me3.update(cx, |v, cx| v.check_versions(cx));
+                }));
+        }
         if skip {
             actions = actions
                 .child(button(t, "flash-anyway", "Reinstall firmware", ButtonKind::Small, true, move |_, _, cx| {

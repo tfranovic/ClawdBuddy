@@ -9,8 +9,19 @@
 // buffer; bounce_buffer_size_px gives ESP-IDF two SRAM bounce buffers so
 // CPU writes to PSRAM don't tear against the DMA scan.
 //
+// Each buffer is refilled from an interrupt while the panel reads the other,
+// so a refill has one buffer's worth of scan time to finish. At 10 lines
+// that was under half a millisecond, and a refill that started late left the
+// start of the buffer holding the lines from 20 rows higher up: thin echoes
+// of bright rows at the left edge. 20 lines doubles the time allowed, for
+// 19 KB more internal RAM. Must divide LCD_HEIGHT.
+//
 // Do not call rgbpanel->getFrameBuffer() after gfx->begin() — that
 // reconstructs the RGB panel a second time and crashes (no free slot).
+
+#define BOUNCE_LINES 20
+static_assert(LCD_HEIGHT % BOUNCE_LINES == 0,
+              "the frame must be a whole number of bounce buffers");
 
 static Arduino_DataBus*      spi      = nullptr;
 static Arduino_ESP32RGBPanel* rgbpanel = nullptr;
@@ -50,7 +61,7 @@ void display_hal_init(void) {
         0 /* pclk_active_neg */, GFX_NOT_DEFINED /* prefer_speed */,
         false /* useBigEndian */,
         0 /* de_idle_high */, 0 /* pclk_idle_high */,
-        LCD_WIDTH * 10 /* bounce_buffer_size_px */);
+        LCD_WIDTH * BOUNCE_LINES /* bounce_buffer_size_px */);
     gfx = new Arduino_RGB_Display(
         LCD_WIDTH, LCD_HEIGHT, rgbpanel, 0 /* rotation */,
         true /* auto_flush */,

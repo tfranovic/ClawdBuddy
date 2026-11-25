@@ -399,7 +399,9 @@ impl FlasherView {
 
     /// "Check for new versions": look again for the newest release (for a
     /// pre-release app, later pre-releases too) and offer it in place of the
-    /// one on screen. A check that fails leaves that one as it is.
+    /// one on screen. A check that fails leaves that one as it is. Asked from
+    /// the Done view, a different release goes straight to its download for
+    /// the board just flashed.
     fn check_versions(&mut self, cx: &mut Context<Self>) {
         if self.checking {
             return;
@@ -417,7 +419,7 @@ impl FlasherView {
                     e.to_string()
                 })
             },
-            |v, r, _| {
+            |v, r, cx| {
                 v.checking = false;
                 match r {
                     Ok(rel) => {
@@ -430,7 +432,11 @@ impl FlasherView {
                         } else {
                             format!("Found {}.", now.version())
                         });
+                        let changed = had.as_deref() != Some(now.version().as_str());
                         v.source = Some(Ok(now));
+                        if changed && v.step == Step::Done && v.port.is_some() && v.board_image().is_some() {
+                            v.start_download(cx);
+                        }
                     }
                     Err(e) => v.check_note = Some(format!("Couldn't check for new versions. {e}")),
                 }
@@ -649,6 +655,11 @@ impl FlasherView {
                             v.progress = 1.;
                             v.log.push("Firmware installed".into());
                             let ver = version.trim_start_matches('v').to_owned();
+                            // What the board runs now, should the flow come
+                            // back to "Your board".
+                            if let Some(i) = &mut v.info {
+                                i.ver = ver.clone();
+                            }
                             let _ = ipc::save_firmware_record(&v.paths, &FirmwareRecord { env, ver });
                             command(&v.paths, AppCommand::Reconnect);
                             v.step = Step::Done;
@@ -695,6 +706,7 @@ impl FlasherView {
         self.log.clear();
         self.progress = 0.;
         self.ticks = 0;
+        self.check_note = None;
     }
 
     // --------------------------------------------------------------- views
@@ -1133,6 +1145,10 @@ impl FlasherView {
 
     fn done_view(&mut self, t: &Theme, cx: &mut Context<Self>) -> gpui::Div {
         let me = cx.entity().downgrade();
+        let me2 = cx.entity().downgrade();
+        let remote = matches!(self.source, Some(Ok(Source::Remote(_))));
+        let checking = self.checking;
+        let note = self.check_note.clone();
         div()
             .flex()
             .flex_col()
@@ -1167,8 +1183,24 @@ impl FlasherView {
                         ButtonKind::Small,
                         true,
                         cx.listener(|_, _, _, cx| cx.emit(Navigate(Page::Device))),
-                    )),
+                    ))
+                    // A newer release goes straight to its download for this
+                    // board: no unplugging, no picking it again.
+                    .when(remote, |d| {
+                        let label = if checking { "Checking…" } else { "Check for new versions" };
+                        d.child(button(
+                            t,
+                            "check-versions-done",
+                            label,
+                            ButtonKind::Small,
+                            !checking,
+                            move |_, _, cx| {
+                                let _ = me2.update(cx, |v, cx| v.check_versions(cx));
+                            },
+                        ))
+                    }),
             )
+            .when_some(note, |d, n| d.child(caption(t, n)))
     }
 }
 

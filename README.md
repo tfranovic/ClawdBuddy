@@ -387,7 +387,10 @@ like any other update: the app itself in the sidebar, the firmware on the
 then stays on what it has until an official release overtakes it.
 
 The app looks for a new release once a day. **Check for new versions** on
-the **Flash** page, beside the board it found, looks at once. An app that
+the **Flash** page, beside the board it found, looks at once. The same
+button is on the page's last screen after a flash: a newer release found
+there goes straight to its download for the board just flashed, with no
+need to pick the board again. An app that
 is itself a development build is then shown later development firmware too,
 whatever the switch says. What the check finds is offered everywhere else as
 well: the **Device** page names it beside the board's own version, and the
